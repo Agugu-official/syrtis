@@ -3,6 +3,26 @@
     <channel>
         <title>TokenBar updates</title>
         <item>
+            <title>2.8.0</title>
+            <pubDate>Fri, 16 Oct 2026 16:58:27 +0000</pubDate>
+            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.8.0</link>
+            <sparkle:version>1583</sparkle:version>
+            <sparkle:shortVersionString>2.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<b>Features:</b>
+<ul>
+<li>DeepSeek Harness (DSH) usage now appears on its own tab, read from DSH's session logs. Thanks @kizaki-R.</li>
+</ul>
+<b>Fixes:</b>
+<ul>
+<li>The refresh indicator now keeps spinning until the window card has finished reading local usage.</li>
+<li>If the window card's reading falls more than two minutes behind, intervals it hasn't read yet say "Reading local usage…" instead of showing 0 tokens.</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.8.0/Syrtis.app.tar.gz" length="14110799" type="application/octet-stream" sparkle:edSignature="fy+RIdXFbtctl+3wbxRYUqq4iRvp8Tw7vAl0sqIBmxjrGZWLOax/B9JN6xqgCvGGQ9mOg7eahBuC89A4AhHsBQ=="/>
+        </item>
+        <item>
             <title>2.7.0</title>
             <pubDate>Sat, 10 Oct 2026 02:05:42 +0000</pubDate>
             <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.7.0</link>
@@ -86,28 +106,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.4.1/Syrtis.app.tar.gz" length="13746263" type="application/octet-stream" sparkle:edSignature="ff+/RYRRXCHYpqs5L6gp7BamI5s1uRdJZ5YFv2acZp6WwCjKEeaz2d0nPGY1Db3vKc61D80hcq9aZFCDxqsMDg=="/>
-        </item>
-        <item>
-            <title>2.4.0</title>
-            <pubDate>Sat, 03 Oct 2026 15:48:40 +0000</pubDate>
-            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.4.0</link>
-            <sparkle:version>1470</sparkle:version>
-            <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<b>Features:</b>
-<ul>
-<li>The window card can switch between accounts. With two or more accounts with live windows (extra Claude config folders, captured Antigravity accounts), a row of account buttons switches the card's windows, curve and history; the choice is remembered. The main account's button shows its email. Window names are shorter, and button rows wrap when they do not fit.</li>
-<li>Antigravity has a window card and window history. Its local usage area reads "Local usage can't be attributed to this account yet." When agy is signed in to a captured account, the main card shows that account's curve and history. Weekly and 5-hour windows draw a curve from their first reading.</li>
-</ul>
-<b>Fixes:</b>
-<ul>
-<li>With automatic capture off, capturing the account agy is using merges it into one card until agy next refreshes its sign-in, usually within an hour. Turn automatic capture on to keep it merged.</li>
-<li>The Antigravity card could stay on "not logged in" after one slow agy run. A timeout is now retried after 15 minutes, and the card shows agy's own error.</li>
-<li>Claude's Designs and Daily Routines windows no longer show an empty history if Anthropic reports them in its newer limits format.</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.4.0/Syrtis.app.tar.gz" length="13695419" type="application/octet-stream" sparkle:edSignature="HrIVfawZvaC5MA5kcFqgZQSjkXgXZxHZkx4sPCQQDZFhVB8ISeE8jqzIQP16eISPhpJ9Or6/QFDTI9ekP8GGAw=="/>
         </item>
         <item>
             <title>1.1.1</title>
