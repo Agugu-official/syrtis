@@ -5727,6 +5727,16 @@ enum SelfTest {
             expect(lettered.size.width == 16 + TrayIcons.prefixWidth && bare.size.width == 16
                        && noReadingLettered.size.width == 16,
                    "the letter widens the icon, and is dropped with no reading")
+            let letterSuite = "syrtis.selftest.windowLetter"
+            let letterDefaults = UserDefaults(suiteName: letterSuite)!
+            letterDefaults.removePersistentDomain(forName: letterSuite)
+            let letterDefaultOn = TrayAnimator.showsWindowLetter(defaults: letterDefaults)
+            let signatureOn = TrayAnimator.currentIconSignature(defaults: letterDefaults)
+            letterDefaults.set(false, forKey: TrayAnimator.windowLetterKey)
+            expect(letterDefaultOn && !TrayAnimator.showsWindowLetter(defaults: letterDefaults)
+                       && TrayAnimator.currentIconSignature(defaults: letterDefaults) != signatureOn,
+                   "the window letter is on until turned off, and turning it off re-renders the icon")
+            letterDefaults.removePersistentDomain(forName: letterSuite)
             // #420: a stale quota title takes the gauge's stale grey, over the
             // automatic verdict colour and over a custom colour alike; a live
             // title, and a title that is not a quota reading, keep theirs.
