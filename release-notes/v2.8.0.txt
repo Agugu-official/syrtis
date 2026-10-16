@@ -1,0 +1,6 @@
+Features:
+- DeepSeek Harness (DSH) usage now appears on its own tab, read from DSH's session logs. Thanks @kizaki-R.
+
+Fixes:
+- The refresh indicator now keeps spinning until the window card has finished reading local usage.
+- If the window card's reading falls more than two minutes behind, intervals it hasn't read yet say "Reading local usage…" instead of showing 0 tokens.
