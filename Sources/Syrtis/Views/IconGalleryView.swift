@@ -16,7 +16,7 @@ struct IconGalleryView: View {
         "antigravity", "antigravity-cli", "grok-bot",
         "hermes", "roocode", "mux", "crush", "goose", "zed", "trae", "openclaw",
         "zcode", "augment", "hindsight", "muse", "reasonix",
-        "kimchi", "senpi", "omp",
+        "kimchi", "senpi", "omp", "dsh",
     ]
 
     private let columns = [GridItem(.adaptive(minimum: 110), spacing: 16)]

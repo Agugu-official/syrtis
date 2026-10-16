@@ -25,6 +25,8 @@ struct AgentIconView: View {
         // Reasonix borrows upstream's Synthetic mark, as upstream does.
         "zcode", "augment", "hindsight", "muse", "reasonix",
         "kimchi", "senpi", "omp",
+        // DeepSeek Harness desktop app icon, cropped to its rounded square.
+        "dsh",
     ]
 
     /// Clients that share another client's brand icon. The Antigravity CLI is
