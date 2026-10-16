@@ -5702,6 +5702,31 @@ enum SelfTest {
                 }
             }
             expect(glyphOK, "#419: the no-reading glyph differs from 100% and from 0% in every style")
+            // Window letter in front of the gauge: read from the window's own duration,
+            // nothing for an unknown length, and only when there is a reading.
+            let letters = [Int64(18_000), 86_400, 604_800, 2_419_200, 2_678_400, 259_200]
+                .map { QuotaSelectionPolicy.windowLetter(durationSeconds: $0) ?? "-" }
+            expect(letters == ["H", "D", "W", "M", "M", "-"]
+                       && QuotaSelectionPolicy.windowLetter(durationSeconds: nil) == nil,
+                   "window letter: 5h H, 1d D, 7d W, 28d and 31d M, 3d and unknown none; got \(letters)")
+            let letterPayload = try! JSONDecoder().decode(
+                AgentUsagePayload.self,
+                from: Data(#"{"generatedAt":"now","agents":[{"clientId":"claude","source":"oauth","updatedAt":"2026-01-01T00:00:00.000Z","windows":[{"cardId":"session.v1","label":"Session","usedPercent":60,"remainingPercent":40,"resetsAt":"2026-07-24T00:00:00Z","windowMinutes":300,"paceStatus":{"state":"learningHistory","windowKey":"session.v1","durationSeconds":18000,"durationSource":"contract","completeCycles":2}},{"cardId":"weekly.v1","label":"Weekly","usedPercent":10,"remainingPercent":90,"resetsAt":"2026-07-24T00:00:00Z","windowMinutes":10080,"paceStatus":{"state":"learningHistory","windowKey":"weekly.v1","durationSeconds":604800,"durationSource":"contract","completeCycles":2}},{"cardId":"model.x.v1","label":"X","usedPercent":95,"remainingPercent":5,"resetsAt":"2026-07-24T00:00:00Z","paceStatus":{"state":"learningDuration","windowKey":"model.x.v1","durationSource":"observed","completeCycles":0}}]}]}"#.utf8))
+            func letterFor(_ selection: String) -> String? {
+                QuotaSelectionPolicy.resolveWindowLetter(
+                    payload: letterPayload, persistedSelection: selection, excluding: [])
+            }
+            expect(letterFor("claude|session.v1") == "H" && letterFor("claude|weekly.v1") == "W"
+                       && letterFor(QuotaResolver.auto) == nil && letterFor("claude|model.x.v1") == nil,
+                   "the letter follows the selected window; Auto on a learning window gets none; got \([letterFor("claude|session.v1"), letterFor("claude|weekly.v1"), letterFor(QuotaResolver.auto)])")
+            let lettered = TrayIcons.image(
+                style: .ring, remaining: 62, dark: true, coloring: .never, prefix: "H")
+            let bare = TrayIcons.image(style: .ring, remaining: 62, dark: true, coloring: .never)
+            let noReadingLettered = TrayIcons.image(
+                style: .ring, remaining: nil, dark: true, coloring: .never, prefix: "H")
+            expect(lettered.size.width == 16 + TrayIcons.prefixWidth && bare.size.width == 16
+                       && noReadingLettered.size.width == 16,
+                   "the letter widens the icon, and is dropped with no reading")
             // #420: a stale quota title takes the gauge's stale grey, over the
             // automatic verdict colour and over a custom colour alike; a live
             // title, and a title that is not a quota reading, keep theirs.

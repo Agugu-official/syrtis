@@ -37,6 +37,36 @@ enum QuotaSelectionPolicy {
             payload: payload, selection: selection, excluding: excluding)
     }
 
+    /// One letter naming the selected window's length, drawn in front of the
+    /// menu-bar gauge: H (up to 6 hours), D (about a day), W (about a week),
+    /// M (about a month). Read from the window's own `durationSeconds`, which
+    /// the engine sets from the provider, a fixed contract or confirmed
+    /// observation, so no provider's labels are parsed. A window whose length
+    /// is not known yet (learning, or a provider that never states one) gets
+    /// no letter rather than a guess, and so does any other length.
+    static func windowLetter(durationSeconds: Int64?) -> String? {
+        guard let s = durationSeconds, s > 0 else { return nil }
+        let hour: Int64 = 3600, day = 24 * hour
+        switch s {
+        case ...(6 * hour): return "H"
+        case (20 * hour)...(30 * hour): return "D"
+        case (6 * day)...(8 * day): return "W"
+        case (27 * day)...(32 * day): return "M"
+        default: return nil
+        }
+    }
+
+    static func resolveWindowLetter(
+        payload: AgentUsagePayload?,
+        persistedSelection: String,
+        excluding: Set<String>
+    ) -> String? {
+        windowLetter(durationSeconds: resolve(
+            payload: payload,
+            persistedSelection: persistedSelection,
+            excluding: excluding)?.window.durationSeconds)
+    }
+
     /// A missing outer payload may reuse the last-good scalar. Once a payload
     /// arrives, only a finite value resolved from that payload is valid.
     static func resolveRemainingPercent(

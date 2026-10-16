@@ -256,7 +256,12 @@ final class TrayAnimator {
             TrayIcons.image(
                 style: gaugeStyle, remaining: quotaRemaining,
                 dark: controller?.isDarkAppearance ?? true,
-                coloring: coloring, stale: stale),
+                coloring: coloring, stale: stale,
+                prefix: QuotaSelectionPolicy.resolveWindowLetter(
+                    payload: quota,
+                    persistedSelection: UserDefaults.standard.string(forKey: Self.quotaSourceKey)
+                        ?? QuotaResolver.auto,
+                    excluding: ClientRegistry.quotaExcludedClients())),
             isTemplate: false)
     }
 
