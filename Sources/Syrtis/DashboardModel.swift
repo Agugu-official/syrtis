@@ -2181,6 +2181,20 @@ private struct DashboardSnapshot {
     /// now, which then serves as fresh for the whole 30s window.
     @ObservationIgnored private static var windowScanToken = 0
 
+    /// Engine window scans running right now. The header spinner reads it:
+    /// stage 2 is never awaited by the poll that starts it, so without this the
+    /// spinner stopped and the window card and its history filled in seconds
+    /// later with nothing on screen saying work was still going.
+    private(set) var windowScansInFlight = 0
+
+    private func scanWindow(accountKey: String?, from: Int64, until: Int64) async throws
+        -> WindowUsage
+    {
+        windowScansInFlight += 1
+        defer { windowScansInFlight -= 1 }
+        return try await source.windowUsage(accountKey: accountKey, from: from, until: until)
+    }
+
     /// Stage 2. One scan for the open agent tab, which every card for that
     /// client then filters from in memory.
     func refreshWindowUsage() async {
@@ -2245,7 +2259,7 @@ private struct DashboardSnapshot {
                 // are independent, and a rate-limited or unreadable account
                 // silently removing every other account's estimate is a worse
                 // answer than the estimates it could still give.
-                guard let usage = try? await source.windowUsage(
+                guard let usage = try? await scanWindow(
                     accountKey: accountKey, from: from, until: now)
                 else { continue }
                 guard Self.windowScanToken == scanToken else { return }
@@ -2334,7 +2348,7 @@ private struct DashboardSnapshot {
         // drawn chart for as long as the failure lasted, which is a spinner
         // that will never stop. The token check keeps an overtaken scan's
         // failure from settling a newer request, exactly as its success is.
-        guard let usage = try? await source.windowUsage(
+        guard let usage = try? await scanWindow(
             accountKey: account, from: from, until: now)
         else {
             guard Self.windowScanToken == scanToken else { return }

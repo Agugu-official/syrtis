@@ -53,6 +53,27 @@ struct WindowUsageHalf: Sendable {
     /// moving curve would state a fact about the user's week that this card
     /// cannot support; saying the scope matched nothing states what happened.
     var scopeMatchedNothing: Bool = false
+    /// Where the scan behind this half stopped (`UnionScan.untilMs`).
+    ///
+    /// The quota half moves with every poll, the scan only when it reruns, so
+    /// the zones between the two hold usage nobody has read yet. Without this
+    /// they drew as empty and their tooltip said "0 tokens · No usage in this
+    /// interval" — the #320 conflation at the tail of the window.
+    var scannedUntilMs: Int64 = .max
+
+    /// Whether `zone` reaches well past the scan, so its bar and totals are
+    /// unknown rather than zero.
+    func isPending(_ zone: HitZone) -> Bool {
+        zone.hiMs > scannedUntilMs.saturatingAdding(Self.scanLagToleranceMs)
+    }
+
+    /// How far the quota half may run ahead of the scan before the tail counts
+    /// as unread. A healthy scan always trails: `refreshWindowUsage` stamps
+    /// `untilMs` before the engine call and the quota half takes its `now`
+    /// after it returns (seconds), and a cached scan is reused for 30 s on a
+    /// 60 s poll. Two minutes clears that ordinary lag, so only a scan that has
+    /// actually stalled (36 minutes behind on 2026-10-13) marks the tail.
+    static let scanLagToleranceMs: Int64 = 120_000
 }
 
 /// What the card is, at any moment. Five cases, exhaustive by construction:
