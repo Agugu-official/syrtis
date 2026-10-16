@@ -83,9 +83,12 @@ enum TrayIcons {
     static let staleFillWhiteDark = 0.70
     static let staleFillWhiteLight = 0.40
 
+    /// Width added in front of the 16-point gauge for the window letter.
+    static let prefixWidth: CGFloat = 9
+
     static func image(
         style: QuotaIconStyle, remaining: Double?, dark: Bool, coloring: IconColoring,
-        stale: Bool = false
+        stale: Bool = false, prefix: String? = nil
     ) -> NSImage {
         let mono: NSColor = dark ? .white : .black
         // A stale reading drops the coloring policy: a green or red that is an
@@ -96,7 +99,23 @@ enum TrayIcons {
             ? staleInk(dark: dark)
             : ink(remaining: remaining, dark: dark, coloring: coloring)
         let level = remaining ?? 100
-        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { _ in
+        // No letter without a reading: it would name a window nothing was read from.
+        let letter = remaining == nil ? nil : prefix
+        let lead: CGFloat = letter == nil ? 0 : prefixWidth
+        let image = NSImage(size: NSSize(width: 16 + lead, height: 16), flipped: false) { _ in
+            if let letter {
+                let attrs: [NSAttributedString.Key: Any] = [
+                    // Monospaced: H, D, W and M are one width, so the letter always
+                    // fits prefixWidth and the icon does not change width between them
+                    // (the proportional W overflowed the 9 pt lead on the left).
+                    .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .semibold),
+                    .foregroundColor: stale ? staleInk(dark: dark) : mono,
+                ]
+                let text = NSAttributedString(string: letter, attributes: attrs)
+                let size = text.size()
+                text.draw(at: NSPoint(x: (lead - 1 - size.width) / 2, y: (16 - size.height) / 2))
+                NSGraphicsContext.current?.cgContext.translateBy(x: lead, y: 0)
+            }
             guard remaining != nil else {
                 drawNoReading(style: style, mono: mono)
                 return true
