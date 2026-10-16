@@ -105,7 +105,10 @@ enum TrayIcons {
         let image = NSImage(size: NSSize(width: 16 + lead, height: 16), flipped: false) { _ in
             if let letter {
                 let attrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                    // Monospaced: H, D, W and M are one width, so the letter always
+                    // fits prefixWidth and the icon does not change width between them
+                    // (the proportional W overflowed the 9 pt lead on the left).
+                    .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .semibold),
                     .foregroundColor: stale ? staleInk(dark: dark) : mono,
                 ]
                 let text = NSAttributedString(string: letter, attributes: attrs)
