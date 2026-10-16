@@ -79,6 +79,9 @@ public enum ClientRegistry {
         "senpi": ("Senpi", "#2f6f63"),
         // Upstream #e11d48 is gjc's; fuchsia sits near the logo's pink-violet.
         "omp": ("Oh My Pi", "#d946ef"),
+        // Vendor-local engine client (no upstream color). DeepSeek's #4d6bfe
+        // sits 6.3 ΔE76 from antigravity-cli; navy keeps every client >= 22.
+        "dsh": ("DeepSeek Harness", "#001259"),
     ]
 
     /// Every registered client id, sorted. Demo fixtures use this canonical

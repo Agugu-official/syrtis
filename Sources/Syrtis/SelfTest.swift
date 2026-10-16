@@ -4735,6 +4735,7 @@ enum SelfTest {
             ("kimchi", "Kimchi", "#7f1d1d"),
             ("senpi", "Senpi", "#2f6f63"),
             ("omp", "Oh My Pi", "#d946ef"),
+            ("dsh", "DeepSeek Harness", "#001259"),
         ] {
             let style = ClientRegistry.style(id)
             expect(style.displayName == name && style.color == color, "\(id) registry metadata")
@@ -4815,7 +4816,7 @@ enum SelfTest {
                 && !officialClientIDs.contains("junie"),
             "icon aliases are official while fallback-only clients are not")
         expect(
-            ["zcode", "augment", "hindsight", "muse", "reasonix", "kimchi", "senpi", "omp"]
+            ["zcode", "augment", "hindsight", "muse", "reasonix", "kimchi", "senpi", "omp", "dsh"]
                 .allSatisfy(officialClientIDs.contains),
             "the 2026-10 clients ship a loadable brand asset")
         let renderedBrandImageMetrics = MainActor.assumeIsolated {
