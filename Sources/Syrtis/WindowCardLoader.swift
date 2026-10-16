@@ -331,7 +331,8 @@ enum WindowCardLoader {
             mine: mine, bars: geo.bars, hits: geo.hits,
             undatedCount: scan.undatedCount,
             scopeMatchedNothing: quota.modelScope != nil
-                && mine.isEmpty && !subscription.isEmpty))
+                && mine.isEmpty && !subscription.isEmpty,
+            scannedUntilMs: scan.untilMs))
     }
 
     static func interval(_ s: WindowResolution) -> (start: Int64, end: Int64)? {

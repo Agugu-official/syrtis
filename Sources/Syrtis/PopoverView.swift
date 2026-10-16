@@ -613,7 +613,7 @@ struct PopoverView: View {
         Button {
             Task { await model.refresh() }
         } label: {
-            if model.refreshing || backgroundRefreshRunning {
+            if showsUpdating {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 16, height: 16)
@@ -631,14 +631,23 @@ struct PopoverView: View {
         .buttonStyle(.plain)
         .disabled(refreshDisabled)
         .help(refreshHelp)
-        // The SAME condition that drives the spinner and the disabled state.
-        // Keying the label on `backgroundRefreshRunning` alone announced
-        // "Refresh usage data" during a manual refresh, when the control is
-        // spinning and disabled — the opposite of what a screen reader user
-        // would be told by the visual state.
+        // The SAME condition that drives the spinner. Keying the label on
+        // `backgroundRefreshRunning` alone announced "Refresh usage data"
+        // during a manual refresh, when the control is spinning and disabled —
+        // the opposite of what a screen reader user would be told by the
+        // visual state.
         .accessibilityLabel(
-            model.refreshing || backgroundRefreshRunning
+            showsUpdating
                 ? "Updating usage data".localized : "Refresh usage data".localized)
+    }
+
+    /// Spinner state: a refresh, or a window-card scan. The scan shows here
+    /// because the poll that starts it never awaits it, so the spinner used to
+    /// stop and the window card fill in seconds later. It does NOT disable the
+    /// button: a manual refresh does not touch the scan, and the scan's FFI call
+    /// runs detached, so a slow one would otherwise lock Refresh with it.
+    private var showsUpdating: Bool {
+        refreshDisabled || model.windowScansInFlight > 0
     }
 
     /// One source for the button's disabled state and the ⌘R shortcut, so the

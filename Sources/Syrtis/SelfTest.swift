@@ -14169,6 +14169,23 @@ enum SelfTest {
             expect(
                 WindowCardLoader.usageHalf(quota: q, scan: covering, confirmed: []) != nil,
                 "L2a a covering scan answers, so the previous check is not vacuous")
+
+            // L2b. The quota half moves with every poll, the scan only when it
+            // reruns: zones past the scan are unread, not empty (#320 at the tail).
+            func tailPending(scanEndSecs: Int64) -> Bool? {
+                let scan = UnionScan(
+                    fromMs: (wReset - 18_000) * 1000, untilMs: scanEndSecs * 1000,
+                    capturedAt: Date(), messages: [])
+                return WindowCardLoader.usageHalf(quota: q, scan: scan, confirmed: [])
+                    .flatMap { half in half.1.hits.last.map(half.1.isPending) }
+            }
+            expect(tailPending(scanEndSecs: wNow - 600) == true,
+                   "L2b the zone reaching past a scan 10 minutes behind is pending, not zero usage")
+            // The live ordering: the scan stamps its end before the engine call
+            // and the quota half takes `now` after it returns, so a healthy
+            // scan always trails by the scan's own duration.
+            expect(tailPending(scanEndSecs: wNow - 5) == false,
+                   "L2b a scan that trails now by its own duration leaves the tail drawn")
         }
 
         // MARK: Agent-limits sparkline eligibility

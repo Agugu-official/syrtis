@@ -363,7 +363,11 @@ struct WindowUsageCard: View {
             }
         }
 
+        let usage = state.usageHalf
         for (i, bar) in geo.bars.enumerated() {
+            // Past the scan: no bar and no baseline tick, because the tick says
+            // "nothing was spent" and nothing has been read here yet.
+            if let usage, usage.isPending(geo.hits[i]) { continue }
             let x = bar.x * w
             let bw = max(bar.width * w - 1, 0.5)
             if bar.isEmpty {
@@ -450,6 +454,10 @@ struct WindowUsageCard: View {
                     return insideStart && $0.timestamp <= zone.hiMs
                 },
                 subtitle: hoverSubtitle,
+                // The scan bound comes from the live state, so "reading" clears
+                // when the scan lands under a still cursor; the zone itself is
+                // the one captured on hover until the cursor moves.
+                pending: state.usageHalf?.isPending(zone) ?? false,
                 measuredSize: $tooltipSize)
                 .offset(placement(anchor: hoverAnchorInCard, container: cardFrame))
                 .allowsHitTesting(false)
@@ -563,6 +571,8 @@ private struct WindowHoverTooltip: View {
     let metric: QuotaMetric
     let messages: [WindowMessage]
     let subtitle: String
+    /// The interval reaches past the last scan: its usage is unknown, not zero.
+    let pending: Bool
     @Binding var measuredSize: CGSize
 
     // Saturating, like every production fold over these counters: the tooltip
@@ -611,40 +621,12 @@ private struct WindowHoverTooltip: View {
                     .foregroundStyle(delta == 0 ? AnyShapeStyle(.tertiary)
                                                 : AnyShapeStyle(.primary))
             }
-            HStack {
-                // Paired with the amount beside it, so the same rule applies in
-                // both directions: an interval of cost-only usage has a real
-                // price and no token count, and "0 tokens · $4.10" reads as a
-                // measurement rather than an absence.
-                Text("%@ tokens".localized(Format.tokens(
-                    tokens: total, cost: messages.reduce(0) { $0 + $1.cost })))
-                Spacer()
-                // `money`: an all-unpriced interval sums to exactly zero,
-                // which `usdOrBelowCent` renders "$0.00" — it only covers the
-                // sub-cent half. Per-interval this is the likelier case of the
-                // two, not the rarer one.
-                Text(Format.money(
-                    tokens: total, cost: messages.reduce(0) { $0 + $1.cost }))
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            ForEach(kinds, id: \.label) { kind in
-                HStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color(hex: kind.color))
-                        .frame(width: 6, height: 6)
-                    Text(kind.label.localized)
-                    Spacer()
-                    Text("\(Format.compactTokens(kind.value)) · "
-                         + "\(Int((Double(kind.value) / Double(max(1, total)) * 100).rounded()))%")
-                        .foregroundStyle(.secondary)
-                }
-                .font(.caption2)
-            }
-            if kinds.isEmpty {
-                Text("No usage in this interval".localized)
+            if pending {
+                Text("Reading local usage…".localized)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+            } else {
+                usageRows
             }
         }
         // Same chrome as the usage chart's tooltip, down to the radius and the
@@ -657,6 +639,44 @@ private struct WindowHoverTooltip: View {
         // GeometryReader reports one frame late, which is exactly the frame
         // the placement is computed in.
         .onGeometryChange(for: CGSize.self) { $0.size } action: { measuredSize = $0 }
+    }
+
+    @ViewBuilder private var usageRows: some View {
+        HStack {
+            // Paired with the amount beside it, so the same rule applies in
+            // both directions: an interval of cost-only usage has a real
+            // price and no token count, and "0 tokens · $4.10" reads as a
+            // measurement rather than an absence.
+            Text("%@ tokens".localized(Format.tokens(
+                tokens: total, cost: messages.reduce(0) { $0 + $1.cost })))
+            Spacer()
+            // `money`: an all-unpriced interval sums to exactly zero,
+            // which `usdOrBelowCent` renders "$0.00" — it only covers the
+            // sub-cent half. Per-interval this is the likelier case of the
+            // two, not the rarer one.
+            Text(Format.money(
+                tokens: total, cost: messages.reduce(0) { $0 + $1.cost }))
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        ForEach(kinds, id: \.label) { kind in
+            HStack(spacing: 4) {
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(Color(hex: kind.color))
+                    .frame(width: 6, height: 6)
+                Text(kind.label.localized)
+                Spacer()
+                Text("\(Format.compactTokens(kind.value)) · "
+                     + "\(Int((Double(kind.value) / Double(max(1, total)) * 100).rounded()))%")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption2)
+        }
+        if kinds.isEmpty {
+            Text("No usage in this interval".localized)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
     }
 }
 
