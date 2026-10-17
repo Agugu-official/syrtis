@@ -1,0 +1,2 @@
+Features:
+- Menu bar gauge icons now show a letter for the length of the window they follow: H (5 hours), D (day), W (week), M (month). Turn it off with "Show window length letter" in Settings.
