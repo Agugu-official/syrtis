@@ -321,6 +321,8 @@
 /* ===== 设置：说明文字 ===== */
 "Spins faster as the live token rate climbs (idle 2 fps, 1M tokens/min tops out at 40 fps)." = "实时 token 速率越高，转得越快（空闲时 2 fps；达到每分钟 100 万 token 时，上限为 40 fps）。";
 "Gauge icons empty as quota is used. \"Color on warning only\" keeps one color until 25% is left, then amber, and red at 10%." = "仪表图标会随额度用掉而变空。“仅警示时上色”平时保持单色，剩 25% 变为琥珀色，剩 10% 变为红色。";
+"Show window length letter" = "显示时间窗长度字母";
+"A letter before the gauge names the window it follows: H for 5 hours, D for a day, W for a week, M for a month. No letter while the window's length is unknown." = "仪表前的字母标出它追踪的时间窗：H 为 5 小时、D 为一天、W 为一周、M 为一个月。时间窗长度未知时不显示字母。";
 "Which quota the gauge icon and the \"Quota left\" title follow. Auto follows whichever window, across all your agents, has the least left." = "仪表图标和“剩余额度”标题跟随哪个额度。“自动”会跟随所有 agent 中剩余最少的那个。";
 "Add a separate menu bar item for a client, showing one of its quota windows. Auto shows the one with the least left." = "为客户端另外添加一个菜单栏项目，显示它的其中一个额度。“自动”显示剩余最少的那个。";
 "Off hides the quota card on Overview and on every client tab." = "关闭后，概览和各客户端标签页都不显示额度卡片。";

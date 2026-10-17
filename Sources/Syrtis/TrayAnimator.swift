@@ -34,6 +34,13 @@ struct TrayAnimationCPUTestConfiguration {
 final class TrayAnimator {
     static let animateKey = "tokenbar.tray.animate"
     static let styleKey = "tokenbar.tray.animationStyle"
+    /// Whether gauge icons lead with the window-length letter (H/D/W/M).
+    /// Absent means on: the letter shipped on by default.
+    static let windowLetterKey = "tokenbar.tray.windowLetter"
+
+    static func showsWindowLetter(defaults d: UserDefaults = .standard) -> Bool {
+        d.object(forKey: windowLetterKey) as? Bool ?? true
+    }
 
     static let quotaSourceKey = "tokenbar.quota.source"
 
@@ -148,7 +155,8 @@ final class TrayAnimator {
         let tabHidden = d.string(forKey: ClientRegistry.tabHiddenKey) ?? ""
         let limitsHidden = d.string(forKey: ClientRegistry.limitsHiddenKey) ?? ""
         let pace = d.string(forKey: AnimationPace.storageKey) ?? ""
-        return [style, animate, quotaSource, lastRemaining, iconColor, tabHidden, limitsHidden, pace]
+        let letter = String(showsWindowLetter(defaults: d))
+        return [style, animate, quotaSource, lastRemaining, iconColor, tabHidden, limitsHidden, pace, letter]
             .joined(separator: "|")
     }
 
@@ -257,11 +265,13 @@ final class TrayAnimator {
                 style: gaugeStyle, remaining: quotaRemaining,
                 dark: controller?.isDarkAppearance ?? true,
                 coloring: coloring, stale: stale,
-                prefix: QuotaSelectionPolicy.resolveWindowLetter(
-                    payload: quota,
-                    persistedSelection: UserDefaults.standard.string(forKey: Self.quotaSourceKey)
-                        ?? QuotaResolver.auto,
-                    excluding: ClientRegistry.quotaExcludedClients())),
+                prefix: Self.showsWindowLetter()
+                    ? QuotaSelectionPolicy.resolveWindowLetter(
+                        payload: quota,
+                        persistedSelection: UserDefaults.standard.string(forKey: Self.quotaSourceKey)
+                            ?? QuotaResolver.auto,
+                        excluding: ClientRegistry.quotaExcludedClients())
+                    : nil),
             isTemplate: false)
     }
 

@@ -395,6 +395,7 @@ private struct MenuBarMock: View {
     @AppStorage(TrayAnimator.styleKey) private var animationStyle = "cat"
     @AppStorage(TrayAnimator.animateKey) private var animateTray = true
     @AppStorage(IconColoring.storageKey) private var iconColoringRaw = IconColoring.warningOnly.rawValue
+    @AppStorage(TrayAnimator.windowLetterKey) private var showsWindowLetter = true
     @AppStorage(TrayAnimator.quotaSourceKey) private var quotaSource = QuotaResolver.auto
 
     var body: some View {
@@ -491,7 +492,13 @@ private struct MenuBarMock: View {
                 now: Date())
             Image(nsImage: TrayIcons.image(
                 style: gauge, remaining: remaining, dark: dark, coloring: coloring,
-                stale: stale))
+                stale: stale,
+                prefix: showsWindowLetter
+                    ? QuotaSelectionPolicy.resolveWindowLetter(
+                        payload: agentUsage,
+                        persistedSelection: quotaSource,
+                        excluding: ClientRegistry.quotaExcludedClients())
+                    : nil))
         } else {
             let frames = PreviewFrames.frames(
                 style: animationStyle, dark: dark,
