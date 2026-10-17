@@ -3,6 +3,21 @@
     <channel>
         <title>TokenBar updates</title>
         <item>
+            <title>2.9.0</title>
+            <pubDate>Sat, 17 Oct 2026 16:29:25 +0000</pubDate>
+            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.9.0</link>
+            <sparkle:version>1592</sparkle:version>
+            <sparkle:shortVersionString>2.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<b>Features:</b>
+<ul>
+<li>Menu bar gauge icons now show a letter for the length of the window they follow: H (up to 6 hours), D (about a day), W (about a week), M (about a month). Turn it off with "Show window length letter" in Settings.</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.9.0/Syrtis.app.tar.gz" length="14117728" type="application/octet-stream" sparkle:edSignature="22vbKDLyjqL7ptXfAII6s/dFTPn+3kDopFuMzn1eteQhkXowQzfsCdX4BpjJRIC8b+DCed8k3le6cmsphMdrAw=="/>
+        </item>
+        <item>
             <title>2.8.0</title>
             <pubDate>Fri, 16 Oct 2026 16:58:27 +0000</pubDate>
             <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.8.0</link>
@@ -84,28 +99,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.5.0/Syrtis.app.tar.gz" length="13886014" type="application/octet-stream" sparkle:edSignature="ShukEzCMYcIHrSbOBzHDwgcDFPBM5PpFgF1HNawrpQW4uQ9MqcRMDtVFqnW4IMBfwZcq98D0i4pA386CesfvAw=="/>
-        </item>
-        <item>
-            <title>2.4.1</title>
-            <pubDate>Tue, 06 Oct 2026 18:52:49 +0000</pubDate>
-            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.4.1</link>
-            <sparkle:version>1516</sparkle:version>
-            <sparkle:shortVersionString>2.4.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<b>Fixes:</b>
-<ul>
-<li>Syrtis kept more than half of a CPU core busy while the popover was open: the activity light redrew the whole popover up to about 120 times a second, and the popover's content ran unseen from launch. With demo data and the popover open, the main thread alone used 57.5% of one core before; the whole app now uses 2.1%. The short spike each time Syrtis rebuilds its usage totals (every Data refresh interval, or every 5 minutes while an agent is active if that is sooner) is unchanged. Thanks @miyago9267.</li>
-<li>An unused Antigravity window read "Pace unavailable · invalid quota data", or started a new window on every update. It now reads "Learning reset duration" until you use it.</li>
-<li>An Antigravity account on a paid Google AI plan was labeled Free. The card shows the paid plan's name, and agy's merged main card shows it too.</li>
-<li>With automatic capture on, an account agy signed in to during a capture could be shown with the previous account's email.</li>
-<li>An extra Claude account's window card counted usage of another configured account kept inside its folder.</li>
-<li>The Grok tab now shows Grok Bot's window card when only Grok Bot is set up.</li>
-<li>Switching off OpenCode under Settings -&gt; Dashboard -&gt; Agent limits no longer hides the other quota cards on the OpenCode tab.</li>
-<li>OpenCode Go's "Rolling" window is now translated in Chinese.</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.4.1/Syrtis.app.tar.gz" length="13746263" type="application/octet-stream" sparkle:edSignature="ff+/RYRRXCHYpqs5L6gp7BamI5s1uRdJZ5YFv2acZp6WwCjKEeaz2d0nPGY1Db3vKc61D80hcq9aZFCDxqsMDg=="/>
         </item>
         <item>
             <title>1.1.1</title>
