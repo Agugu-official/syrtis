@@ -86,6 +86,36 @@ enum TrayIcons {
     /// Width added in front of the 16-point gauge for the window letter.
     static let prefixWidth: CGFloat = 9
 
+    /// Draws the letter's glyph directly instead of typesetting a string.
+    /// v2.9.0 drew an NSAttributedString here, and CoreText intermittently
+    /// threw "attempt to insert nil object" from TAttributes::ApplyFont while
+    /// sizing it inside this drawing handler (seen on a status-item replicant
+    /// redraw after 3 h 52 min on a test build, and once within 20 s in a tight
+    /// loop of the same drawing, which a dozen later minute-long loops did not
+    /// repeat), aborting the app. CTFontDrawGlyphs draws glyphs without
+    /// building an attributed line, so that frame is never reached. Placement reproduces the old
+    /// `size()`/`draw(at:)` pixel for pixel (compared for H, D, W and M at 2x):
+    /// advance width centred in the lead, the line height rounded up as
+    /// `size()` does and centred, baseline the rounded-up descent above it.
+    static func drawLetter(_ letter: String, color: NSColor, lead: CGFloat) {
+        // Monospaced: H, D, W and M are one width, so the letter always fits
+        // prefixWidth and the icon does not change width between them (the
+        // proportional W overflowed the 9 pt lead on the left).
+        let font: CTFont = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .semibold)
+        var chars = Array(letter.utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: chars.count)
+        guard !chars.isEmpty, CTFontGetGlyphsForCharacters(font, &chars, &glyphs, chars.count),
+              let cg = NSGraphicsContext.current?.cgContext else { return }
+        let advance = CTFontGetAdvancesForGlyphs(font, .horizontal, glyphs, nil, 1)
+        let descent = CTFontGetDescent(font)
+        let height = (CTFontGetAscent(font) + descent + CTFontGetLeading(font)).rounded(.up)
+        var origin = CGPoint(x: (lead - 1 - advance) / 2, y: (16 - height) / 2 + descent.rounded(.up))
+        cg.saveGState()
+        cg.setFillColor(color.cgColor)
+        CTFontDrawGlyphs(font, glyphs, &origin, 1, cg)
+        cg.restoreGState()
+    }
+
     static func image(
         style: QuotaIconStyle, remaining: Double?, dark: Bool, coloring: IconColoring,
         stale: Bool = false, prefix: String? = nil
@@ -104,16 +134,7 @@ enum TrayIcons {
         let lead: CGFloat = letter == nil ? 0 : prefixWidth
         let image = NSImage(size: NSSize(width: 16 + lead, height: 16), flipped: false) { _ in
             if let letter {
-                let attrs: [NSAttributedString.Key: Any] = [
-                    // Monospaced: H, D, W and M are one width, so the letter always
-                    // fits prefixWidth and the icon does not change width between them
-                    // (the proportional W overflowed the 9 pt lead on the left).
-                    .font: NSFont.monospacedSystemFont(ofSize: 10.5, weight: .semibold),
-                    .foregroundColor: stale ? staleInk(dark: dark) : mono,
-                ]
-                let text = NSAttributedString(string: letter, attributes: attrs)
-                let size = text.size()
-                text.draw(at: NSPoint(x: (lead - 1 - size.width) / 2, y: (16 - size.height) / 2))
+                drawLetter(letter, color: stale ? staleInk(dark: dark) : mono, lead: lead)
                 NSGraphicsContext.current?.cgContext.translateBy(x: lead, y: 0)
             }
             guard remaining != nil else {
