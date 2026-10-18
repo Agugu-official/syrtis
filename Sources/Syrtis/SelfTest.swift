@@ -5727,6 +5727,27 @@ enum SelfTest {
             expect(lettered.size.width == 16 + TrayIcons.prefixWidth && bare.size.width == 16
                        && noReadingLettered.size.width == 16,
                    "the letter widens the icon, and is dropped with no reading")
+            // The letter is drawn as a glyph, not typeset (the typesetter aborted
+            // v2.9.0), so check the lead actually carries ink for every letter.
+            func leadInk(_ image: NSImage) -> Int {
+                guard let rep = NSBitmapImageRep(
+                    bitmapDataPlanes: nil, pixelsWide: Int(image.size.width) * 2, pixelsHigh: 32,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return 0 }
+                rep.size = image.size
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+                image.draw(in: NSRect(origin: .zero, size: image.size))
+                NSGraphicsContext.restoreGraphicsState()
+                return (0..<Int(TrayIcons.prefixWidth) * 2).reduce(0) { sum, x in
+                    sum + (0..<32).filter { (rep.colorAt(x: x, y: $0)?.alphaComponent ?? 0) > 0.5 }.count
+                }
+            }
+            let inked = ["H", "D", "W", "M"].map {
+                leadInk(TrayIcons.image(style: .bars, remaining: 62, dark: true, coloring: .never, prefix: $0))
+            }
+            expect(inked.allSatisfy { $0 > 40 },
+                   "every window letter leaves ink in the lead; got \(inked) px")
             let letterSuite = "syrtis.selftest.windowLetter"
             let letterDefaults = UserDefaults(suiteName: letterSuite)!
             letterDefaults.removePersistentDomain(forName: letterSuite)
