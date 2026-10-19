@@ -3,6 +3,21 @@
     <channel>
         <title>TokenBar updates</title>
         <item>
+            <title>2.9.1</title>
+            <pubDate>Mon, 19 Oct 2026 13:21:17 +0000</pubDate>
+            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.9.1</link>
+            <sparkle:version>1597</sparkle:version>
+            <sparkle:shortVersionString>2.9.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<b>Fixes:</b>
+<ul>
+<li>v2.9.0 could quit unexpectedly while a gauge icon showed the window length letter. The letter is now drawn without the macOS text layout step that intermittently stopped Syrtis, and looks the same.</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.9.1/Syrtis.app.tar.gz" length="14121962" type="application/octet-stream" sparkle:edSignature="RN6z65olV0Yt7/eNcMQDgU2Uzh0RoMR49XJXlV4U+gIdHHVTCYyXdQmsxS63FzF/kVgjiKEdeq2LUiJze92DBw=="/>
+        </item>
+        <item>
             <title>2.9.0</title>
             <pubDate>Sat, 17 Oct 2026 16:29:25 +0000</pubDate>
             <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.9.0</link>
@@ -80,25 +95,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.6.0/Syrtis.app.tar.gz" length="13928157" type="application/octet-stream" sparkle:edSignature="AMJ5KxLY2F8+zo2t79/CsYuD4h9hQ+o/G8tE2i8v2iyuklUN0kKqKpP54NVy5wAhJyiObyYMCbCHDTVienQ+BQ=="/>
-        </item>
-        <item>
-            <title>2.5.0</title>
-            <pubDate>Tue, 06 Oct 2026 20:27:34 +0000</pubDate>
-            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.5.0</link>
-            <sparkle:version>1537</sparkle:version>
-            <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<b>Features:</b>
-<ul>
-<li>Cursor usage without the tokscale CLI: Syrtis downloads your usage itself, using the Cursor app's login on this Mac. A card on the Overview asks first (only if Cursor is installed); after Continue it syncs at launch and every 30 minutes. The login goes only to cursor.com and is never saved; Syrtis stores the date, model, token counts, cost and conversation ID of each request, and turning it off deletes them. Settings -&gt; General -&gt; Cursor usage sync has the switch and Sync Now. If the tokscale CLI already has Cursor data, Settings asks before Syrtis uses its own sync, so usage is counted once.</li>
-</ul>
-<b>Fixes:</b>
-<ul>
-<li>Cursor usage synced by a recent tokscale CLI (saved as usage.json) is now read. Thanks @whes1015.</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.5.0/Syrtis.app.tar.gz" length="13886014" type="application/octet-stream" sparkle:edSignature="ShukEzCMYcIHrSbOBzHDwgcDFPBM5PpFgF1HNawrpQW4uQ9MqcRMDtVFqnW4IMBfwZcq98D0i4pA386CesfvAw=="/>
         </item>
         <item>
             <title>1.1.1</title>
