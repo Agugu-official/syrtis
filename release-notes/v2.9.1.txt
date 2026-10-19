@@ -1,0 +1,2 @@
+Fixes:
+- v2.9.0 could quit unexpectedly while a gauge icon showed the window length letter. The letter is now drawn without the macOS text layout step that intermittently stopped Syrtis, and looks the same.
