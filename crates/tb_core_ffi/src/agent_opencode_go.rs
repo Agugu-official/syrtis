@@ -3,9 +3,9 @@
 //! The OpenCode Go plan exposes a subscription quota at `/zen/go/v1/usage`,
 //! reporting a rolling, weekly, and monthly window as used-percent snapshots
 //! with a reset time. We authenticate with the API key OpenCode stored for its
-//! "opencode-go" login (`~/.local/share/opencode/auth.json`, `type: "api"`), so
-//! the card appears whenever the Go plan is signed in there. Each window maps to
-//! one `UsageWindow`.
+//! "opencode-go" login (v2's SQLite credential store, else the v1
+//! `~/.local/share/opencode/auth.json`), so the card appears whenever the Go
+//! plan is signed in there. Each window maps to one `UsageWindow`.
 //!
 //! Two contracts this file honors, both stricter than mana.bar's original:
 //!

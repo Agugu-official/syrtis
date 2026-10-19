@@ -60,8 +60,9 @@ pub struct AgentUsagePayload {
     publication_generation: u64,
     agents: Vec<AgentUsageSnapshot>,
     /// Subscription-type providers opencode is authenticated against (its
-    /// `auth.json` `type: "oauth"` entries), e.g. ["Codex", "Copilot"]. Surfaced
-    /// so the user can see which agent subscriptions opencode also draws on.
+    /// credential store's `type: "oauth"` entries), e.g. ["Codex", "Copilot"].
+    /// Surfaced so the user can see which agent subscriptions opencode also
+    /// draws on.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     opencode_subscriptions: Vec<String>,
 }
@@ -1686,7 +1687,7 @@ pub(crate) const QUOTA_PROVIDERS: &[QuotaProvider] = &[
         id: ProviderId::Kiro,
         fetch: |id| provider_fetch(async move { fetch_kiro(id).await.into_iter().collect() }),
     },
-    // OpenCode Go only appears when opencode auth.json holds an "opencode-go" api key.
+    // OpenCode Go only appears when opencode's credential store holds an "opencode-go" api key.
     QuotaProvider {
         id: ProviderId::OpenCode,
         fetch: |id| provider_fetch(async move { fetch_opencode_go(id).await.into_iter().collect() }),
