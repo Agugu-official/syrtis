@@ -222,7 +222,9 @@ final class StatusItemController: NSObject {
     }
 
     func showPopover() {
-        guard let button = statusItem.button else { return }
+        let anchor = statusItem.isVisible ? statusItem
+            : clientStatusItems.sorted(by: { $0.key < $1.key }).first?.value
+        guard let button = anchor?.button else { return }
         guard !isShown else { return }
         let current = persistedRoute()
         applyRoute(routeMemory.activateMain(
@@ -304,6 +306,14 @@ final class StatusItemController: NSObject {
             textColors[presentation.clientId] = MenuBarTextColor.resolve(
                 automatic: nil, quotaRemaining: presentation.remainingPercent)
         }
+        defer {
+            // Keep an entry point if all individual items are disabled or fail
+            // to render. Hide the aggregate item only after replacements exist.
+            let shouldShow = ClientTray.shouldShowMainItem(
+                hideMain: UserDefaults.standard.bool(forKey: ClientTray.hideMainItemKey),
+                hasIndividualItems: !clientStatusItems.isEmpty)
+            if statusItem.isVisible != shouldShow { statusItem.isVisible = shouldShow }
+        }
         guard next != lastClientPresentations || textColors != lastClientTextColors else { return }
 
         for id in Array(clientStatusItems.keys) where next[id] == nil {
@@ -348,10 +358,35 @@ final class StatusItemController: NSObject {
         image: NSImage? = nil
     ) {
         guard let button = item.button else { return }
+        let existingSurface = button.subviews.compactMap { $0 as? CompactClientStatusView }.first
         if let image { button.image = image }
-        button.imagePosition = .imageLeft
-        button.imageScaling = .scaleNone
-        Self.setTitle(" \(presentation.valueText)", color: textColor, on: button)
+        if presentation.displayStyle == .stackedReset,
+           let countdown = presentation.countdownText,
+           let icon = existingSurface?.icon ?? button.image {
+            let surface = existingSurface ?? CompactClientStatusView(icon: icon)
+            surface.percent = ClientTray.percentText(presentation.remainingPercent)
+            surface.countdown = countdown
+            surface.textColor = textColor
+            button.attributedTitle = NSAttributedString(string: "")
+            button.title = ""
+            button.image = nil
+            button.imagePosition = .noImage
+            item.length = surface.contentLayout.width
+            if surface.superview == nil { button.addSubview(surface) }
+            surface.frame = button.bounds
+            surface.needsDisplay = true
+        } else {
+            if let surface = existingSurface {
+                button.image = surface.icon
+                surface.removeFromSuperview()
+            }
+            item.length = NSStatusItem.variableLength
+            button.imagePosition = .imageLeft
+            button.imageScaling = .scaleNone
+            button.cell?.wraps = false
+            button.cell?.usesSingleLineMode = true
+            Self.setTitle(" \(presentation.valueText)", color: textColor, on: button)
+        }
         button.toolTip = presentation.toolTip
         button.setAccessibilityLabel(presentation.accessibilityLabel)
         button.setAccessibilityIdentifier(presentation.processIdentity)

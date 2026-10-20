@@ -84,6 +84,9 @@ final class StatusItemRouteMemory {
 
 /// Pure contracts shared by individual status items and the Settings surface.
 enum ClientTray {
+    static let hideMainItemKey = "tokenbar.tray.hideMainItem"
+    static let displayStyleKey = "tokenbar.tray.clients.displayStyle"
+
     static let enabledKey = "tokenbar.tray.clients.enabled"
     static let selectionsKey = "tokenbar.tray.clients.quotaSelections"
     static let activeTabKey = "tokenbar.activeTab"
@@ -96,6 +99,35 @@ enum ClientTray {
     static let maxEntries = 128
     static let maxClientIDBytes = 128
     static let maxCardIDBytes = 4096
+
+    enum DisplayStyle: String, CaseIterable, Equatable, Sendable {
+        case percentage
+        case inlineReset
+        case stackedReset
+
+        var label: String {
+            switch self {
+            case .percentage: return "Percentage only"
+            case .inlineReset: return "Percentage and reset time"
+            case .stackedReset: return "Compact two-line"
+            }
+        }
+
+        var showsReset: Bool { self != .percentage }
+
+        static func current(defaults: UserDefaults = .standard) -> Self {
+            Self(rawValue: defaults.string(forKey: ClientTray.displayStyleKey) ?? "") ?? .percentage
+        }
+    }
+
+    struct ResetCountdown: Equatable, Sendable {
+        let text: String
+        let accessibilityLabel: String
+    }
+
+    static func shouldShowMainItem(hideMain: Bool, hasIndividualItems: Bool) -> Bool {
+        !hideMain || !hasIndividualItems
+    }
 
     enum Status: String, Equatable, Sendable {
         case available
@@ -154,13 +186,20 @@ enum ClientTray {
         let displayName: String
         let remainingPercent: Double?
         let status: Status
+        var displayStyle: DisplayStyle = .percentage
+        var countdown: ResetCountdown? = nil
+
+        var countdownText: String? { countdown?.text }
 
         var processIdentity: String { ClientTray.processIdentity(for: clientId) }
         var autosaveName: String { ClientTray.autosaveName(for: clientId) }
 
-        var valueText: String { ClientTray.percentText(remainingPercent) }
+        var valueText: String {
+            let percent = ClientTray.percentText(remainingPercent)
+            return countdownText.map { "\(percent) · \($0)" } ?? percent
+        }
 
-        var toolTip: String {
+        private var quotaToolTip: String {
             if status == .missingSelection {
                 return "%@ — selected quota window unavailable".localized(displayName)
             }
@@ -174,7 +213,7 @@ enum ClientTray {
             return "%@ — quota unavailable".localized(displayName)
         }
 
-        var accessibilityLabel: String {
+        private var quotaAccessibilityLabel: String {
             if status == .missingSelection {
                 return "%@, selected quota window unavailable".localized(displayName)
             }
@@ -186,13 +225,22 @@ enum ClientTray {
             }
             return ClientTray.quotaAccessibilityLabel(displayName, remainingPercent)
         }
+
+        var toolTip: String {
+            countdown.map { "\(quotaToolTip) — \($0.accessibilityLabel)" } ?? quotaToolTip
+        }
+
+        var accessibilityLabel: String {
+            countdown.map { "\(quotaAccessibilityLabel). \($0.accessibilityLabel)" }
+                ?? quotaAccessibilityLabel
+        }
     }
 
     static func enabled(defaults: UserDefaults = .standard) -> Set<String> {
         parseEnabledRaw(defaults.object(forKey: enabledKey) as? String)
     }
 
-    /// Settings owns both preferences through `@AppStorage`, so mutation is a
+    /// Settings owns the enabled and selection preferences through `@AppStorage`, so mutation is a
     /// pure raw-to-raw transform; nil means the stored raw is out of bounds and
     /// must not be repaired by write-back.
     static func enabledRaw(
@@ -291,7 +339,8 @@ enum ClientTray {
         orderRaw: String,
         officialClients: Set<String>
     ) -> [SettingsRow] {
-        let present = canonicalIDs(presentClients)
+        var present = canonicalIDs(presentClients)
+        for id in enabled.sorted() where !present.contains(id) { present.append(id) }
         // Agent presence in the quota payload is the stable capability signal.
         // A supported provider can temporarily return only an error and zero
         // windows (for example while its local OAuth client is unavailable);
@@ -381,9 +430,12 @@ enum ClientTray {
         enabled: Set<String>,
         selections: [String: String],
         hidden: Set<String>,
-        officialClients: Set<String>
+        officialClients: Set<String>,
+        displayStyle: DisplayStyle = .percentage,
+        now: Date = Date()
     ) -> [Presentation] {
-        let present = canonicalIDs(graph?.summary.clients ?? [])
+        var present = canonicalIDs(graph?.summary.clients ?? [])
+        for id in enabled.sorted() where !present.contains(id) { present.append(id) }
         return present
             .filter { enabled.contains($0) && officialClients.contains($0) && !hidden.contains($0) }
             .sorted()
@@ -413,8 +465,25 @@ enum ClientTray {
                     clientId: clientId,
                     displayName: ClientRegistry.style(clientId).displayName,
                     remainingPercent: resolved?.remainingPercent,
-                    status: status)
+                    status: status,
+                    displayStyle: displayStyle,
+                    countdown: displayStyle.showsReset && status == .available
+                        ? resetCountdown(resetsAt: resolved?.resetsAt, now: now) : nil)
             }
+    }
+
+    /// Only a structured timestamp from the selected healthy window may
+    /// drive the countdown. Never display an unvalidated provider string.
+    static func resetCountdown(resetsAt: String?, now: Date) -> ResetCountdown? {
+        guard let resetsAt else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let reset = fractional.date(from: resetsAt) ?? ISO8601DateFormatter().date(from: resetsAt)
+        else { return nil }
+        guard let span = UsagePace.spanText(until: reset, now: now) else {
+            return ResetCountdown(text: "Resetting".localized, accessibilityLabel: "Resets now".localized)
+        }
+        return ResetCountdown(text: span, accessibilityLabel: "Resets in %@".localized(span))
     }
 
     /// One rounding site: every displayed percent, tooltip, and accessibility

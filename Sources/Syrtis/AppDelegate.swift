@@ -119,6 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A fresh quota or rate fetch re-renders the title right away.
         animator.onQuotaUpdated = { [weak self] in self?.applyMenuBarState() }
         animator.start()
+        applyMenuBarState()
         startTitleRefresh()
 
         // didChangeNotification carries no key and fires for EVERY write — the
@@ -528,7 +529,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             enabled: ClientTray.enabled(),
             selections: ClientTray.selections(),
             hidden: ClientRegistry.hiddenTabClients(),
-            officialClients: AgentIconView.availableOfficialClientIDs()))
+            officialClients: AgentIconView.availableOfficialClientIDs(),
+            displayStyle: ClientTray.DisplayStyle.current()))
     }
 
     /// The hidden-tabs set changed: fetch the filtered live rate once, off the
