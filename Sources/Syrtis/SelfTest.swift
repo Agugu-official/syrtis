@@ -1534,6 +1534,11 @@ enum SelfTest {
                     >= (oneX.map { $0.alphaBounds.height } ?? .infinity) * 1.8,
             "tray 2x raster preserves logical alpha coverage"
         )
+        expect(
+            trayFrame.map(StatusItemAnimationSurface.pauseTimerStatesForTesting)
+                == [true, false, false, false, true],
+            "a hidden main item stops its frame timer and resumes with the latest frames"
+        )
 #endif
 
         // ModelColors: provider inference + shade math.
@@ -5259,6 +5264,20 @@ enum SelfTest {
                 presentClients: ["claude"], payload: quotaPayload, enabled: ["codex"], selections: [:],
                 hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId) == ["claude", "codex"],
             "explicitly enabled clients stay configurable without graph history")
+        let loadingRows = ClientTray.settingsRows(
+            presentClients: [], payload: quotaPayload, enabled: ["claude", "codex"], selections: [:],
+            hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId)
+        let loadedRows = ClientTray.settingsRows(
+            presentClients: ["codex", "claude"], payload: quotaPayload, enabled: ["claude", "codex"],
+            selections: [:], hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId)
+        expect(loadingRows == ["claude", "codex"] && loadedRows == loadingRows,
+            "enabled Settings rows keep their order when graph history finishes loading")
+        expect(
+            ClientTray.settingsRows(
+                presentClients: [], payload: quotaPayload, enabled: ["claude", "codex"], selections: [:],
+                hidden: [], orderRaw: "codex,claude", officialClients: officialClientIDs
+            ).map(\.clientId) == ["codex", "claude"],
+            "a saved tab order still orders Settings rows")
         expect(
             ClientTray.settingsRows(
                 presentClients: [], payload: nil, enabled: [], selections: [:], hidden: [],
@@ -5286,14 +5305,14 @@ enum SelfTest {
 
         // Rows must not depend on Set iteration order. With no saved tab order
         // and no payload, every row comes from the preserved-enabled path, which
-        // must follow the ordered `present` array.
+        // is sorted by ID so it matches the rows shown before the graph loads.
         expect(
             ClientTray.settingsRows(
                 presentClients: ["codex", "claude", "grok"], payload: nil,
                 enabled: ["grok", "claude", "codex"], selections: [:], hidden: [],
                 orderRaw: "", officialClients: officialClientIDs
-            ).map(\.clientId) == ["codex", "claude", "grok"],
-            "preserved enabled rows follow graph order, not enabled-set hash order")
+            ).map(\.clientId) == ["claude", "codex", "grok"],
+            "preserved enabled rows are sorted by ID, not enabled-set hash order")
 
         // A vanished explicit card is reported as a missing selection on the item
         // itself, not as a generic provider outage — the user has to change the
@@ -5368,11 +5387,29 @@ enum SelfTest {
         } else {
             expect(false, "isolated individual display preference suite is available")
         }
-        expect(ClientTray.shouldShowMainItem(hideMain: false, hasIndividualItems: false)
-            && ClientTray.shouldShowMainItem(hideMain: false, hasIndividualItems: true)
-            && ClientTray.shouldShowMainItem(hideMain: true, hasIndividualItems: false)
-            && !ClientTray.shouldShowMainItem(hideMain: true, hasIndividualItems: true),
-            "the main item can only hide while a replacement item exists")
+        let visibilityCases: [([Bool], Bool)] = [
+            ([], true), ([false], true), ([false, false], true),
+            ([true], false), ([false, true], false), ([true, true], false),
+        ]
+        for (visibility, expectedMainVisibility) in visibilityCases {
+            expect(ClientTray.shouldShowMainItem(hideMain: false, individualItemVisibility: visibility),
+                "the main item remains visible when hiding is disabled")
+            expect(ClientTray.shouldShowMainItem(hideMain: true, individualItemVisibility: visibility)
+                == expectedMainVisibility,
+                "allocated but hidden individual items cannot suppress the main entry point")
+        }
+        expect(ClientTray.popoverAnchor(mainVisible: true, clientVisibility: ["codex": true]) == .main
+            && ClientTray.popoverAnchor(
+                mainVisible: false, clientVisibility: ["codex": true, "claude": false]) == .client("codex")
+            && ClientTray.popoverAnchor(
+                mainVisible: false, clientVisibility: ["codex": true, "claude": true]) == .client("claude")
+            && ClientTray.popoverAnchor(mainVisible: false, clientVisibility: ["codex": false]) == nil,
+            "a programmatic open anchors to a visible client item as that client, never as main")
+        expect(ClientTray.clientClick(isRightClick: false, mainVisible: true) == .popover
+            && ClientTray.clientClick(isRightClick: false, mainVisible: false) == .popover
+            && ClientTray.clientClick(isRightClick: true, mainVisible: true) == .ignore
+            && ClientTray.clientClick(isRightClick: true, mainVisible: false) == .quotaMenu,
+            "client right-click opens the quota-source menu only while the main item is hidden")
         for (percent, countdown) in [("48%", "4d 23h"), ("100%", "59m"), ("9%", "resetting")] {
             let compact = CompactClientStatusView.Layout(
                 percent: percent, countdown: countdown, color: .white)
@@ -5393,6 +5430,12 @@ enum SelfTest {
                     "stacked client glyphs and icon are centered with a gap at height \(height)")
             }
         }
+        let stackedWidths = [
+            ("9%", "59m"), ("57%", "2h 15m"), ("100%", "23h 59m"), ("48%", "29d 23h"),
+            ("9%", "Resetting"), ("—%", "—"),
+        ].map { CompactClientStatusView.Layout(percent: $0.0, countdown: $0.1, color: .white).width }
+        expect(Set(stackedWidths).count == 1,
+            "stacked items keep one width across countdown ticks and the no-countdown placeholder")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
                "client countdown formats days and hours")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",

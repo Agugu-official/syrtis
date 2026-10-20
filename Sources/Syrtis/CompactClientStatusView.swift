@@ -1,5 +1,6 @@
 import AppKit
 import CoreText
+import TokenBarCore
 
 /// Draws inside the native status button; the button still owns input,
 /// highlighting, the tooltip, and accessibility.
@@ -16,23 +17,41 @@ final class CompactClientStatusView: NSView {
         let sidePadding: CGFloat = 6
 
         init(percent: String, countdown: String, color: NSColor) {
-            percentLine = CTLineCreateWithAttributedString(NSAttributedString(
-                string: percent, attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold),
-                    .foregroundColor: color,
-                ]))
-            countdownLine = CTLineCreateWithAttributedString(NSAttributedString(
-                string: countdown, attributes: [
-                    .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
-                    .foregroundColor: color,
-                ]))
+            percentLine = Self.line(percent, percent: true, color: color)
+            countdownLine = Self.line(countdown, percent: false, color: color)
             percentInk = CTLineGetBoundsWithOptions(percentLine, .useGlyphPathBounds)
             countdownInk = CTLineGetBoundsWithOptions(countdownLine, .useGlyphPathBounds)
         }
 
+        private static func line(_ text: String, percent: Bool, color: NSColor) -> CTLine {
+            CTLineCreateWithAttributedString(NSAttributedString(
+                string: text, attributes: [
+                    .font: NSFont.monospacedDigitSystemFont(
+                        ofSize: percent ? 10 : 9, weight: percent ? .semibold : .regular),
+                    .foregroundColor: color,
+                ]))
+        }
+
+        /// The widest text the item can show, so its width does not follow
+        /// each countdown tick and neighbouring menu-bar items stay put.
+        private static let reservedTextWidth: CGFloat = {
+            let countdowns = [
+                UsagePace.durationText(29 * 86_400 + 23 * 3_600),
+                UsagePace.durationText(23 * 3_600 + 59 * 60),
+                "Resetting".localized,
+            ]
+            let widths = [line("100%", percent: true, color: .labelColor)]
+                + countdowns.map { line($0, percent: false, color: .labelColor) }
+            return ceil(widths.map {
+                CTLineGetBoundsWithOptions($0, .useGlyphPathBounds).width
+            }.max() ?? 0)
+        }()
+
         var textWidth: CGFloat { ceil(max(percentInk.width, countdownInk.width)) }
         var textHeight: CGFloat { percentInk.height + rowGap + countdownInk.height }
-        var width: CGFloat { sidePadding * 2 + iconSize + iconGap + textWidth }
+        var width: CGFloat {
+            sidePadding * 2 + iconSize + iconGap + max(textWidth, Self.reservedTextWidth)
+        }
 
         func frames(in bounds: CGRect) -> (icon: CGRect, percent: CGRect, countdown: CGRect) {
             let left = bounds.midX - (iconSize + iconGap + textWidth) / 2

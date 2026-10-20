@@ -19,6 +19,7 @@ final class StatusItemController: NSObject {
     private var animationSurface: StatusItemAnimationSurface?
     private var hasPresentedIcon = false
     private var clientStatusItems: [String: NSStatusItem] = [:]
+    private var clientVisibilityObservations: [String: NSKeyValueObservation] = [:]
     private var lastClientPresentations: [String: ClientTray.Presentation] = [:]
     private var lastClientTextColors: [String: NSColor] = [:]
     private let routeMemory: StatusItemRouteMemory
@@ -222,14 +223,25 @@ final class StatusItemController: NSObject {
     }
 
     func showPopover() {
-        let anchor = statusItem.isVisible ? statusItem
-            : clientStatusItems.sorted(by: { $0.key < $1.key }).first?.value
-        guard let button = anchor?.button else { return }
         guard !isShown else { return }
         let current = persistedRoute()
-        applyRoute(routeMemory.activateMain(
-            currentClient: current.clientId, currentView: current.view))
-        presentPopover(from: button, identity: "main")
+        switch ClientTray.popoverAnchor(
+            mainVisible: statusItem.isVisible,
+            clientVisibility: clientStatusItems.mapValues(\.isVisible)
+        ) {
+        case .main:
+            guard let button = statusItem.button else { return }
+            applyRoute(routeMemory.activateMain(
+                currentClient: current.clientId, currentView: current.view))
+            presentPopover(from: button, identity: "main")
+        case .client(let clientId):
+            guard let button = clientStatusItems[clientId]?.button else { return }
+            applyRoute(routeMemory.activateClient(
+                clientId, currentClient: current.clientId, currentView: current.view))
+            presentPopover(from: button, identity: ClientTray.processIdentity(for: clientId))
+        case nil:
+            return
+        }
     }
 
     private func persistedRoute() -> StatusItemRouteMemory.Route {
@@ -306,14 +318,7 @@ final class StatusItemController: NSObject {
             textColors[presentation.clientId] = MenuBarTextColor.resolve(
                 automatic: nil, quotaRemaining: presentation.remainingPercent)
         }
-        defer {
-            // Keep an entry point if all individual items are disabled or fail
-            // to render. Hide the aggregate item only after replacements exist.
-            let shouldShow = ClientTray.shouldShowMainItem(
-                hideMain: UserDefaults.standard.bool(forKey: ClientTray.hideMainItemKey),
-                hasIndividualItems: !clientStatusItems.isEmpty)
-            if statusItem.isVisible != shouldShow { statusItem.isVisible = shouldShow }
-        }
+        defer { reconcileMainItemVisibility() }
         guard next != lastClientPresentations || textColors != lastClientTextColors else { return }
 
         for id in Array(clientStatusItems.keys) where next[id] == nil {
@@ -339,6 +344,18 @@ final class StatusItemController: NSObject {
         lastClientTextColors = textColors
     }
 
+    private func reconcileMainItemVisibility() {
+        // AppKit restores visibility through autosaveName. An allocated item
+        // is not necessarily a usable replacement for the main entry point.
+        let shouldShow = ClientTray.shouldShowMainItem(
+            hideMain: UserDefaults.standard.bool(forKey: ClientTray.hideMainItemKey),
+            individualItemVisibility: clientStatusItems.values.map(\.isVisible))
+        if statusItem.isVisible != shouldShow { statusItem.isVisible = shouldShow }
+        // A hidden main item keeps its frames but runs no frame timer; quota
+        // and countdown refresh are driven elsewhere and continue.
+        animationSurface?.setPaused(!shouldShow)
+    }
+
     private func createClientItem(_ presentation: ClientTray.Presentation, textColor: NSColor?) -> Bool {
         guard let image = AgentIconView.statusItemImage(clientId: presentation.clientId) else {
             return false
@@ -347,6 +364,13 @@ final class StatusItemController: NSObject {
         item.autosaveName = presentation.autosaveName
         if #available(macOS 27.0, *), glassPanel != nil { item.expandedInterfaceDelegate = self }
         clientStatusItems[presentation.clientId] = item
+        clientVisibilityObservations[presentation.clientId] = item.observe(
+            \.isVisible, options: [.new]
+        ) { [weak self] _, _ in
+            // Status-item visibility is AppKit UI state and changes on the
+            // main thread, independently of quota/defaults reconciliation.
+            MainActor.assumeIsolated { self?.reconcileMainItemVisibility() }
+        }
         updateClientItem(item, presentation: presentation, textColor: textColor, image: image)
         return true
     }
@@ -361,11 +385,11 @@ final class StatusItemController: NSObject {
         let existingSurface = button.subviews.compactMap { $0 as? CompactClientStatusView }.first
         if let image { button.image = image }
         if presentation.displayStyle == .stackedReset,
-           let countdown = presentation.countdownText,
            let icon = existingSurface?.icon ?? button.image {
             let surface = existingSurface ?? CompactClientStatusView(icon: icon)
             surface.percent = ClientTray.percentText(presentation.remainingPercent)
-            surface.countdown = countdown
+            // Stay two-line without a countdown so the item keeps its width.
+            surface.countdown = presentation.countdownText ?? "—"
             surface.textColor = textColor
             button.attributedTitle = NSAttributedString(string: "")
             button.title = ""
@@ -393,10 +417,11 @@ final class StatusItemController: NSObject {
         button.identifier = NSUserInterfaceItemIdentifier(presentation.processIdentity)
         button.target = self
         button.action = #selector(clientItemAction(_:))
-        button.sendAction(on: [.leftMouseUp])
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
     }
 
     private func removeClientItem(_ clientId: String) {
+        clientVisibilityObservations.removeValue(forKey: clientId)?.invalidate()
         guard let item = clientStatusItems.removeValue(forKey: clientId) else { return }
         if popoverAnchorIdentity == ClientTray.processIdentity(for: clientId) {
             closePopover()
@@ -414,8 +439,21 @@ final class StatusItemController: NSObject {
 
     @objc private func clientItemAction(_ sender: Any?) {
         guard let button = sender as? NSStatusBarButton,
-              let clientId = clientStatusItems.first(where: { $0.value.button === button })?.key
+              let entry = clientStatusItems.first(where: { $0.value.button === button })
         else { return }
+        let clientId = entry.key
+        switch ClientTray.clientClick(
+            isRightClick: NSApp.currentEvent?.type == .rightMouseUp,
+            mainVisible: statusItem.isVisible
+        ) {
+        case .ignore:
+            return
+        case .quotaMenu:
+            presentQuotaMenu(on: entry.value)
+            return
+        case .popover:
+            break
+        }
 
         let current = persistedRoute()
         applyRoute(routeMemory.activateClient(
@@ -460,12 +498,7 @@ final class StatusItemController: NSObject {
 
     @objc private func togglePopover(_ sender: Any?) {
         if NSApp.currentEvent?.type == .rightMouseUp {
-            isShowingQuotaMenu = true
-            showQuotaMenu()
-            isShowingQuotaMenu = false
-            // The session the menu bar opened during tracking is ended only
-            // now: cancelling it while the menu tracked dismissed the menu.
-            if let glassPanel, !glassPanel.isShown { glassPanel.close() }
+            presentQuotaMenu(on: statusItem)
             return
         }
         if glassPanel != nil { return } // left clicks arrive as sessions
@@ -478,11 +511,20 @@ final class StatusItemController: NSObject {
 
     // MARK: - Right-click quota-source menu
 
+    private func presentQuotaMenu(on item: NSStatusItem) {
+        isShowingQuotaMenu = true
+        showQuotaMenu(on: item)
+        isShowingQuotaMenu = false
+        // The session the menu bar opened during tracking is ended only
+        // now: cancelling it while the menu tracked dismissed the menu.
+        if let glassPanel, !glassPanel.isShown { glassPanel.close() }
+    }
+
     /// "What does the icon track?" — Auto plus every known quota window with
     /// its live remaining percent, checkmark on the current pick. Writes the
     /// same defaults key the settings panel edits; the icon follows within a
     /// couple of seconds.
-    private func showQuotaMenu() {
+    private func showQuotaMenu(on item: NSStatusItem) {
         let menu = NSMenu()
         let payload = quotaPayloadProvider?()
         let persistedSelection = UserDefaults.standard.string(forKey: TrayAnimator.quotaSourceKey)
@@ -544,9 +586,9 @@ final class StatusItemController: NSObject {
 
         // Pop up via a transient menu assignment so the next left-click still
         // toggles the popover instead of re-opening the menu.
-        statusItem.menu = menu
-        statusItem.button?.performClick(nil)
-        statusItem.menu = nil
+        item.menu = menu
+        item.button?.performClick(nil)
+        item.menu = nil
     }
 
     @objc private func pickQuotaSource(_ sender: NSMenuItem) {

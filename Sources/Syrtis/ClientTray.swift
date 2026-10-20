@@ -125,8 +125,34 @@ enum ClientTray {
         let accessibilityLabel: String
     }
 
-    static func shouldShowMainItem(hideMain: Bool, hasIndividualItems: Bool) -> Bool {
-        !hideMain || !hasIndividualItems
+    static func shouldShowMainItem(hideMain: Bool, individualItemVisibility: [Bool]) -> Bool {
+        !hideMain || !individualItemVisibility.contains(true)
+    }
+
+    enum PopoverAnchor: Equatable, Sendable {
+        case main
+        case client(String)
+    }
+
+    /// A programmatic open anchors to the main item, or to the first visible
+    /// client item when the main item is hidden. A client anchor owns that
+    /// client's identity and route, so its own click closes the popover.
+    static func popoverAnchor(mainVisible: Bool, clientVisibility: [String: Bool]) -> PopoverAnchor? {
+        if mainVisible { return .main }
+        return clientVisibility.filter(\.value).keys.min().map(PopoverAnchor.client)
+    }
+
+    enum ClientClick: Equatable, Sendable {
+        case popover
+        case quotaMenu
+        case ignore
+    }
+
+    /// Right-click on a client item opens the main item's quota-source menu
+    /// only while the main item is hidden; otherwise it keeps doing nothing.
+    static func clientClick(isRightClick: Bool, mainVisible: Bool) -> ClientClick {
+        guard isRightClick else { return .popover }
+        return mainVisible ? .ignore : .quotaMenu
     }
 
     enum Status: String, Equatable, Sendable {
@@ -350,16 +376,15 @@ enum ClientTray {
         let newlyConfigurable = present.filter {
             quotaCapable.contains(quotaClientID(for: $0)) && officialClients.contains($0)
         }
-        // Derived from the ordered `present` array, not by iterating the enabled
-        // Set: `orderedClients` returns its input untouched when no tab order is
-        // saved, so hash order would leak into the UI and then visibly reshuffle
-        // once the payload lands and `newlyConfigurable` supplies graph order.
         let preserved = present.filter {
             enabled.contains($0) && officialClients.contains($0)
         }
         var ids = newlyConfigurable
         for id in preserved where !ids.contains(id) { ids.append(id) }
-        ids = ClientRegistry.orderedClients(ids, orderRaw: orderRaw)
+        // Sorted before the saved tab order, matching the menu-bar items: the
+        // graph's order is unknown while it loads, so following it would
+        // reorder enabled rows once it lands.
+        ids = ClientRegistry.orderedClients(ids.sorted(), orderRaw: orderRaw)
 
         return ids.map { clientId in
             let selection = selections[clientId] ?? autoSelection
