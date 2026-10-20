@@ -5405,11 +5405,6 @@ enum SelfTest {
                 mainVisible: false, clientVisibility: ["codex": true, "claude": true]) == .client("claude")
             && ClientTray.popoverAnchor(mainVisible: false, clientVisibility: ["codex": false]) == nil,
             "a programmatic open anchors to a visible client item as that client, never as main")
-        expect(ClientTray.clientClick(isRightClick: false, mainVisible: true) == .popover
-            && ClientTray.clientClick(isRightClick: false, mainVisible: false) == .popover
-            && ClientTray.clientClick(isRightClick: true, mainVisible: true) == .ignore
-            && ClientTray.clientClick(isRightClick: true, mainVisible: false) == .quotaMenu,
-            "client right-click opens the quota-source menu only while the main item is hidden")
         for (percent, countdown) in [("48%", "4d 23h"), ("100%", "59m"), ("9%", "resetting")] {
             let compact = CompactClientStatusView.Layout(
                 percent: percent, countdown: countdown, color: .white)
@@ -5430,12 +5425,16 @@ enum SelfTest {
                     "stacked client glyphs and icon are centered with a gap at height \(height)")
             }
         }
-        let stackedWidths = [
+        let stackedLayouts = [
             ("9%", "59m"), ("57%", "2h 15m"), ("100%", "23h 59m"), ("48%", "29d 23h"),
             ("9%", "Resetting"), ("—%", "—"),
-        ].map { CompactClientStatusView.Layout(percent: $0.0, countdown: $0.1, color: .white).width }
-        expect(Set(stackedWidths).count == 1,
+        ].map { CompactClientStatusView.Layout(percent: $0.0, countdown: $0.1, color: .white) }
+        expect(Set(stackedLayouts.map(\.width)).count == 1,
             "stacked items keep one width across countdown ticks and the no-countdown placeholder")
+        expect(Set(stackedLayouts.map {
+            $0.frames(in: CGRect(x: 0, y: 0, width: $0.width, height: 22)).icon.minX
+        }).count == 1,
+            "the stacked icon stays in place as the countdown text changes")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
                "client countdown formats days and hours")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",

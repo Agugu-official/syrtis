@@ -350,7 +350,11 @@ final class StatusItemController: NSObject {
         let shouldShow = ClientTray.shouldShowMainItem(
             hideMain: UserDefaults.standard.bool(forKey: ClientTray.hideMainItemKey),
             individualItemVisibility: clientStatusItems.values.map(\.isVisible))
-        if statusItem.isVisible != shouldShow { statusItem.isVisible = shouldShow }
+        if statusItem.isVisible != shouldShow {
+            // A popover anchored to the main item cannot stay on a hidden button.
+            if !shouldShow, isShown, popoverAnchorIdentity == "main" { closePopover() }
+            statusItem.isVisible = shouldShow
+        }
         // A hidden main item keeps its frames but runs no frame timer; quota
         // and countdown refresh are driven elsewhere and continue.
         animationSurface?.setPaused(!shouldShow)
@@ -417,7 +421,7 @@ final class StatusItemController: NSObject {
         button.identifier = NSUserInterfaceItemIdentifier(presentation.processIdentity)
         button.target = self
         button.action = #selector(clientItemAction(_:))
-        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        button.sendAction(on: [.leftMouseUp])
     }
 
     private func removeClientItem(_ clientId: String) {
@@ -439,21 +443,8 @@ final class StatusItemController: NSObject {
 
     @objc private func clientItemAction(_ sender: Any?) {
         guard let button = sender as? NSStatusBarButton,
-              let entry = clientStatusItems.first(where: { $0.value.button === button })
+              let clientId = clientStatusItems.first(where: { $0.value.button === button })?.key
         else { return }
-        let clientId = entry.key
-        switch ClientTray.clientClick(
-            isRightClick: NSApp.currentEvent?.type == .rightMouseUp,
-            mainVisible: statusItem.isVisible
-        ) {
-        case .ignore:
-            return
-        case .quotaMenu:
-            presentQuotaMenu(on: entry.value)
-            return
-        case .popover:
-            break
-        }
 
         let current = persistedRoute()
         applyRoute(routeMemory.activateClient(
@@ -498,7 +489,12 @@ final class StatusItemController: NSObject {
 
     @objc private func togglePopover(_ sender: Any?) {
         if NSApp.currentEvent?.type == .rightMouseUp {
-            presentQuotaMenu(on: statusItem)
+            isShowingQuotaMenu = true
+            showQuotaMenu()
+            isShowingQuotaMenu = false
+            // The session the menu bar opened during tracking is ended only
+            // now: cancelling it while the menu tracked dismissed the menu.
+            if let glassPanel, !glassPanel.isShown { glassPanel.close() }
             return
         }
         if glassPanel != nil { return } // left clicks arrive as sessions
@@ -511,20 +507,11 @@ final class StatusItemController: NSObject {
 
     // MARK: - Right-click quota-source menu
 
-    private func presentQuotaMenu(on item: NSStatusItem) {
-        isShowingQuotaMenu = true
-        showQuotaMenu(on: item)
-        isShowingQuotaMenu = false
-        // The session the menu bar opened during tracking is ended only
-        // now: cancelling it while the menu tracked dismissed the menu.
-        if let glassPanel, !glassPanel.isShown { glassPanel.close() }
-    }
-
     /// "What does the icon track?" — Auto plus every known quota window with
     /// its live remaining percent, checkmark on the current pick. Writes the
     /// same defaults key the settings panel edits; the icon follows within a
     /// couple of seconds.
-    private func showQuotaMenu(on item: NSStatusItem) {
+    private func showQuotaMenu() {
         let menu = NSMenu()
         let payload = quotaPayloadProvider?()
         let persistedSelection = UserDefaults.standard.string(forKey: TrayAnimator.quotaSourceKey)
@@ -586,9 +573,9 @@ final class StatusItemController: NSObject {
 
         // Pop up via a transient menu assignment so the next left-click still
         // toggles the popover instead of re-opening the menu.
-        item.menu = menu
-        item.button?.performClick(nil)
-        item.menu = nil
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     @objc private func pickQuotaSource(_ sender: NSMenuItem) {

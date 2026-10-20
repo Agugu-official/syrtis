@@ -36,6 +36,7 @@ final class StatusItemAnimationSurface {
     private weak var backingWindow: NSWindow?
     private var layoutGeneration = 0
     private var isAnimated = false
+    private var isPaused = false
     private var tornDown = false
 
     var onAppearanceChange: (() -> Void)?
@@ -143,8 +144,12 @@ final class StatusItemAnimationSurface {
     /// Stops the frame timer while the item is hidden, keeping frames and
     /// speed so showing the item resumes the same animation.
     func setPaused(_ paused: Bool) {
-        guard !tornDown else { return }
+        guard !tornDown, paused != isPaused else { return }
+        isPaused = paused
         runnerLayer.setPaused(paused)
+        // Frames swapped in while hidden wait for a layout pass, which a
+        // hidden button may not have had.
+        if !paused { scheduleLayout() }
     }
 
     func showStatic(_ image: NSImage, isTemplate: Bool) {

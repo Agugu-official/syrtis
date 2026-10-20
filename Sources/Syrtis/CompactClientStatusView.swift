@@ -54,7 +54,9 @@ final class CompactClientStatusView: NSView {
         }
 
         func frames(in bounds: CGRect) -> (icon: CGRect, percent: CGRect, countdown: CGRect) {
-            let left = bounds.midX - (iconSize + iconGap + textWidth) / 2
+            // Centered on the reserved width so the icon stays put as the
+            // countdown changes; the text sits at the left of that box.
+            let left = bounds.midX - (iconSize + iconGap + max(textWidth, Self.reservedTextWidth)) / 2
             let textLeft = left + iconSize + iconGap
             let bottom = bounds.midY - textHeight / 2
             return (

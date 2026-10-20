@@ -142,19 +142,6 @@ enum ClientTray {
         return clientVisibility.filter(\.value).keys.min().map(PopoverAnchor.client)
     }
 
-    enum ClientClick: Equatable, Sendable {
-        case popover
-        case quotaMenu
-        case ignore
-    }
-
-    /// Right-click on a client item opens the main item's quota-source menu
-    /// only while the main item is hidden; otherwise it keeps doing nothing.
-    static func clientClick(isRightClick: Bool, mainVisible: Bool) -> ClientClick {
-        guard isRightClick else { return .popover }
-        return mainVisible ? .ignore : .quotaMenu
-    }
-
     enum Status: String, Equatable, Sendable {
         case available
         case suppressed
@@ -381,9 +368,9 @@ enum ClientTray {
         }
         var ids = newlyConfigurable
         for id in preserved where !ids.contains(id) { ids.append(id) }
-        // Sorted before the saved tab order, matching the menu-bar items: the
-        // graph's order is unknown while it loads, so following it would
-        // reorder enabled rows once it lands.
+        // Sorted by ID before the saved tab order: the graph's order is
+        // unknown while it loads, so following it would reorder enabled rows
+        // once it lands.
         ids = ClientRegistry.orderedClients(ids.sorted(), orderRaw: orderRaw)
 
         return ids.map { clientId in
