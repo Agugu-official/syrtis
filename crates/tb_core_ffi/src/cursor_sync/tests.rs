@@ -1221,6 +1221,8 @@ struct EngineEnv {
 
 impl EngineEnv {
     fn set(config_dir: &Path) -> Self {
+        // Save the isolated dir, not unset, so the restore keeps other scans off the real cache.
+        crate::isolate_test_config();
         let keys = ["TOKSCALE_CONFIG_DIR", "TOKSCALE_PRICING_CACHE_ONLY"];
         let saved = keys.iter().map(|k| (*k, std::env::var_os(k))).collect();
         std::env::set_var("TOKSCALE_CONFIG_DIR", config_dir);

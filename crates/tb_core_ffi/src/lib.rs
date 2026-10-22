@@ -64,6 +64,59 @@ pub(crate) fn user_home_dir() -> Option<PathBuf> {
     )
 }
 
+/// The engine's source-message cache follows the process config dir, not the
+/// fixture home, so a test that scans would read and rewrite the developer's
+/// real `~/.config/tokscale` cache: 185s with the real HOME against 8.7s with
+/// a clean one. One temp dir per test process keeps the cold write once
+/// instead of per test.
+///
+/// TOKSCALE_CONFIG_DIR because it is the only switch `get_config_dir` honours
+/// on macOS (XDG_CONFIG_HOME is ignored there), and it also turns off the
+/// legacy-cache reads. The cursor-sync `EngineEnv` calls this before saving
+/// the variable, so its restore lands back on this dir, not on unset.
+///
+/// Each dir holds a lock file locked for the life of its process; dirs whose
+/// lock is free belong to finished runs and are swept here.
+#[cfg(test)]
+pub(crate) fn isolate_test_config() {
+    use fs2::FileExt;
+    static LOCK: LazyLock<Option<std::fs::File>> = LazyLock::new(|| {
+        // An explicit override (the tail benchmark) wins.
+        if std::env::var_os("TOKSCALE_CONFIG_DIR").is_some() {
+            return None;
+        }
+        let tmp = std::env::temp_dir();
+        let prefix = "tb_core_ffi-test-config-";
+        for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if !name.starts_with(prefix) || name.ends_with(".lock") {
+                continue;
+            }
+            let lock_path = tmp.join(format!("{name}.lock"));
+            let free = std::fs::File::open(&lock_path)
+                .map_or(true, |lock| lock.try_lock_exclusive().is_ok());
+            if free {
+                let _ = std::fs::remove_dir_all(entry.path());
+                let _ = std::fs::remove_file(&lock_path);
+            }
+        }
+        // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
+        let dir = tmp.join(format!("{prefix}{}", std::process::id()));
+        let lock = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
+            .expect("create test config lock");
+        lock.lock_exclusive().expect("lock test config dir");
+        std::fs::create_dir_all(&dir).expect("create test config dir");
+        // SAFETY: set_var races with getenv on other threads. This runs once per
+        // test process, inside the LazyLock, so the window is a single write
+        // instead of one per fixture; a test reading the environment at that
+        // instant is the remaining (accepted) risk.
+        unsafe { std::env::set_var("TOKSCALE_CONFIG_DIR", &dir) };
+        Some(lock)
+    });
+    LazyLock::force(&LOCK);
+}
+
 /// Snapshot the local source roots used by every FFI report and parse path.
 /// Environment roots are process-startup configuration: changing them requires
 /// restarting the FFI process. Cache keys intentionally do not fingerprint roots.
@@ -78,6 +131,8 @@ pub(crate) struct LocalSourceContext {
 
 impl LocalSourceContext {
     pub(crate) fn current() -> Self {
+        #[cfg(test)]
+        isolate_test_config();
         Self {
             home_dir: user_home_dir(),
             use_env_roots: true,
@@ -88,6 +143,7 @@ impl LocalSourceContext {
     /// read the developer's real session files.
     #[cfg(test)]
     pub(crate) fn for_home(home_dir: PathBuf) -> Self {
+        isolate_test_config();
         Self {
             home_dir: Some(home_dir),
             use_env_roots: true,
