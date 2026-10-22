@@ -1494,4 +1494,17 @@ mod tests {
         .unwrap_err()
         .contains("pooled team allowance"));
     }
+
+    #[test]
+    fn parse_timestamp_keeps_seconds_at_the_millisecond_boundary() {
+        let seconds = 100_000_000_000i64;
+        assert_eq!(
+            parse_timestamp(&serde_json::json!(seconds)).map(|dt| dt.timestamp()),
+            Some(seconds)
+        );
+        assert_eq!(
+            parse_timestamp(&serde_json::json!(seconds * 1000)).map(|dt| dt.timestamp()),
+            Some(seconds)
+        );
+    }
 }

@@ -3832,6 +3832,16 @@ mod tests {
         );
         assert!(is_language_server(&cmd.to_lowercase()));
         assert!(is_antigravity(&cmd.to_lowercase()));
+        assert!(
+            !is_language_server("codex exec --json"),
+            "a command without the language_server marker was classified as one"
+        );
+    }
+
+    #[test]
+    fn find_sub_matches_a_needle_that_spans_the_whole_haystack() {
+        assert_eq!(find_sub(b"abc", b"abc"), Some(0));
+        assert_eq!(find_sub(b"abc", b"abcd"), None);
     }
 
     #[test]
@@ -4672,6 +4682,11 @@ mod tests {
         assert_eq!(
             resolve_remote_plan(&json!({"currentTier":{"id":"free-tier"}})).as_deref(),
             Some("Free")
+        );
+        assert_eq!(
+            resolve_remote_plan(&json!({"currentTier":{"id":"standard-tier"}})).as_deref(),
+            Some("Paid"),
+            "a paying subscriber labelled standard-tier was not mapped to Paid"
         );
         assert_eq!(
             resolve_remote_plan(&json!({"planInfo":{"planType":"standard"}})).as_deref(),

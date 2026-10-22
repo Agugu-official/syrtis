@@ -3178,4 +3178,50 @@ mod tests {
             backend.cleanup();
         }
     }
+
+    /// The handle is compared with the path *after* the open: a directory
+    /// swapped in at the same path must be refused, or later writes land in a
+    /// directory that was never validated.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_swapped_out_after_open_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store");
+        fs::create_dir(&path).unwrap();
+        let handle = fs::File::open(&path).unwrap();
+        assert!(verify_open_directory(&path, &handle).is_ok());
+
+        fs::rename(&path, dir.path().join("moved")).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(
+            verify_open_directory(&path, &handle).is_err(),
+            "a handle for the replaced directory was accepted"
+        );
+
+        let file_path = dir.path().join("artifact");
+        fs::write(&file_path, b"x").unwrap();
+        let file_handle = fs::File::open(&file_path).unwrap();
+        assert!(
+            verify_open_directory(&file_path, &file_handle).is_err(),
+            "a regular file was accepted as a directory handle"
+        );
+    }
+
+    /// Every provider gets its own refresh lock; in particular the
+    /// Antigravity arm must exist rather than falling into the error arm.
+    #[test]
+    fn every_provider_has_its_own_refresh_lock() {
+        let locks = [
+            refresh_process_lock("codex").unwrap(),
+            refresh_process_lock("claude").unwrap(),
+            refresh_process_lock("grok").unwrap(),
+            refresh_process_lock("antigravity").unwrap(),
+        ];
+        assert!(refresh_process_lock("unknown").is_err());
+        for (i, a) in locks.iter().enumerate() {
+            for b in &locks[i + 1..] {
+                assert!(!std::ptr::eq(*a, *b), "two providers share one refresh lock");
+            }
+        }
+    }
 }
