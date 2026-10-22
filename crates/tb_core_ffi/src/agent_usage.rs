@@ -3945,8 +3945,11 @@ fn load_claude_credentials_from_keychain_item(
     claude_keychain_item_output(output.status.code(), output.stdout)
 }
 
+// Call sites pass the keychain service on every platform; the stub must take
+// the same arguments or tb_core_ffi does not compile off macOS.
 #[cfg(not(target_os = "macos"))]
 fn load_claude_credentials_from_keychain_item(
+    _service: &str,
     _account: Option<&str>,
 ) -> Result<Option<String>, String> {
     Ok(None)
