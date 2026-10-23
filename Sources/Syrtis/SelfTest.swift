@@ -5418,11 +5418,13 @@ enum SelfTest {
                 let bounds = CGRect(x: 0, y: 0, width: compact.width, height: height)
                 let frames = compact.frames(in: bounds)
                 let textBounds = frames.percent.union(frames.countdown)
-                expect(abs(textBounds.midY - frames.icon.midY) < 0.01
-                    && abs(textBounds.midY - bounds.midY) < 0.01
+                expect(abs(frames.text.midY - frames.icon.midY) < 0.01
+                    && abs(frames.text.midY - bounds.midY) < 0.01
+                    // The descender of "g" sits exactly on the band's edge.
+                    && frames.text.insetBy(dx: -0.01, dy: -0.01).contains(textBounds)
                     && textBounds.minX - frames.icon.maxX >= 6
-                    && bounds.contains(textBounds),
-                    "stacked client glyphs and icon are centered with a gap at height \(height)")
+                    && bounds.contains(frames.text),
+                    "stacked client text box and icon are centered with a gap at height \(height)")
             }
         }
         let stackedLayouts = [
@@ -5435,6 +5437,15 @@ enum SelfTest {
             $0.frames(in: CGRect(x: 0, y: 0, width: $0.width, height: 22)).icon.minX
         }).count == 1,
             "the stacked icon stays in place as the countdown text changes")
+        // Baseline = glyph rect bottom minus that line's own ink offset. Laid
+        // out from the current glyphs instead, "—" moved the percent line 4 pt.
+        let stackedBaselines = stackedLayouts.map { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return [frames.percent.minY - layout.percentInk.minY,
+                    frames.countdown.minY - layout.countdownInk.minY].map { ($0 * 100).rounded() }
+        }
+        expect(Set(stackedBaselines).count == 1,
+            "stacked percent and countdown baselines stay put across countdown text and the placeholder")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
                "client countdown formats days and hours")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",
