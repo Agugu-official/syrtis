@@ -72,50 +72,67 @@ pub(crate) fn user_home_dir() -> Option<PathBuf> {
 ///
 /// TOKSCALE_CONFIG_DIR because it is the only switch `get_config_dir` honours
 /// on macOS (XDG_CONFIG_HOME is ignored there), and it also turns off the
-/// legacy-cache reads. The cursor-sync `EngineEnv` calls this before saving
-/// the variable, so its restore lands back on this dir, not on unset.
+/// legacy-cache reads. It runs from the platform initializer list below,
+/// before `main` and so before the test harness starts any thread: the
+/// `set_var` cannot race a `getenv`, and the cursor-sync `EngineEnv` saves
+/// and restores this dir, not unset.
 ///
 /// Each dir holds a lock file locked for the life of its process; dirs whose
-/// lock is free belong to finished runs and are swept here.
+/// lock is free belong to finished runs and are swept here. The sweep keeps
+/// that lock until both are removed, so a process reusing the pid blocks
+/// instead of creating its dir mid-removal; a dir with no lock file is left.
 #[cfg(test)]
-pub(crate) fn isolate_test_config() {
+extern "C" fn isolate_test_config() {
     use fs2::FileExt;
-    static LOCK: LazyLock<Option<std::fs::File>> = LazyLock::new(|| {
-        // An explicit override (the tail benchmark) wins.
-        if std::env::var_os("TOKSCALE_CONFIG_DIR").is_some() {
-            return None;
+    // An explicit override (the tail benchmark) wins.
+    if std::env::var_os("TOKSCALE_CONFIG_DIR").is_some() {
+        let _ = TEST_CONFIG_LOCK.set(None);
+        return;
+    }
+    let tmp = std::env::temp_dir();
+    let prefix = "tb_core_ffi-test-config-";
+    for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(prefix) || name.ends_with(".lock") {
+            continue;
         }
-        let tmp = std::env::temp_dir();
-        let prefix = "tb_core_ffi-test-config-";
-        for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if !name.starts_with(prefix) || name.ends_with(".lock") {
-                continue;
-            }
-            let lock_path = tmp.join(format!("{name}.lock"));
-            let free = std::fs::File::open(&lock_path)
-                .map_or(true, |lock| lock.try_lock_exclusive().is_ok());
-            if free {
-                let _ = std::fs::remove_dir_all(entry.path());
-                let _ = std::fs::remove_file(&lock_path);
-            }
+        let lock_path = tmp.join(format!("{name}.lock"));
+        let Ok(lock) = std::fs::File::open(&lock_path) else {
+            continue;
+        };
+        if lock.try_lock_exclusive().is_ok() {
+            let _ = std::fs::remove_dir_all(entry.path());
+            let _ = std::fs::remove_file(&lock_path);
         }
-        // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
-        let dir = tmp.join(format!("{prefix}{}", std::process::id()));
-        let lock = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
-            .expect("create test config lock");
-        lock.lock_exclusive().expect("lock test config dir");
-        std::fs::create_dir_all(&dir).expect("create test config dir");
-        // SAFETY: set_var races with getenv on other threads. This runs once per
-        // test process, inside the LazyLock, so the window is a single write
-        // instead of one per fixture; a test reading the environment at that
-        // instant is the remaining (accepted) risk.
-        unsafe { std::env::set_var("TOKSCALE_CONFIG_DIR", &dir) };
-        Some(lock)
-    });
-    LazyLock::force(&LOCK);
+    }
+    // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
+    let dir = tmp.join(format!("{prefix}{}", std::process::id()));
+    let lock = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
+        .expect("create test config lock");
+    lock.lock_exclusive().expect("lock test config dir");
+    std::fs::create_dir_all(&dir).expect("create test config dir");
+    // SAFETY: called once from the initializer list, single-threaded, before `main`.
+    unsafe { std::env::set_var("TOKSCALE_CONFIG_DIR", &dir) };
+    let _ = TEST_CONFIG_LOCK.set(Some(lock));
 }
+
+/// Set by `isolate_test_config`; `None` when an explicit override was kept.
+#[cfg(test)]
+static TEST_CONFIG_LOCK: std::sync::OnceLock<Option<std::fs::File>> = std::sync::OnceLock::new();
+
+// The libtest harness has no pre-thread hook, so register with the loader's
+// initializer list (what the `ctor` crate does) instead of adding a dependency
+// to a crate the Windows repo copies byte for byte.
+#[cfg(test)]
+#[used]
+#[cfg_attr(target_vendor = "apple", link_section = "__DATA,__mod_init_func")]
+#[cfg_attr(
+    any(target_os = "linux", target_os = "android", target_os = "freebsd"),
+    link_section = ".init_array"
+)]
+#[cfg_attr(windows, link_section = ".CRT$XCU")]
+static ISOLATE_TEST_CONFIG: extern "C" fn() = isolate_test_config;
 
 /// Snapshot the local source roots used by every FFI report and parse path.
 /// Environment roots are process-startup configuration: changing them requires
@@ -131,8 +148,6 @@ pub(crate) struct LocalSourceContext {
 
 impl LocalSourceContext {
     pub(crate) fn current() -> Self {
-        #[cfg(test)]
-        isolate_test_config();
         Self {
             home_dir: user_home_dir(),
             use_env_roots: true,
@@ -143,7 +158,6 @@ impl LocalSourceContext {
     /// read the developer's real session files.
     #[cfg(test)]
     pub(crate) fn for_home(home_dir: PathBuf) -> Self {
-        isolate_test_config();
         Self {
             home_dir: Some(home_dir),
             use_env_roots: true,
@@ -1639,6 +1653,16 @@ mod tests {
     use usage_tail::UsageTailer;
 
     static QUOTA_CURVE_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// Nothing calls `isolate_test_config` but the loader, so a platform that
+    /// skips the initializer list would put scans back on the real cache silently.
+    #[test]
+    fn the_test_config_isolation_ran_before_main() {
+        assert!(
+            TEST_CONFIG_LOCK.get().is_some(),
+            "isolate_test_config never ran"
+        );
+    }
 
     /// Drives the real `extern "C"` symbol rather than `set_from_json`, so the
     /// envelope encoding, the NUL check and the UTF-8 check are all exercised
