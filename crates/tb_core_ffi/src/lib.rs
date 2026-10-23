@@ -73,14 +73,17 @@ pub(crate) fn user_home_dir() -> Option<PathBuf> {
 /// TOKSCALE_CONFIG_DIR because it is the only switch `get_config_dir` honours
 /// on macOS (XDG_CONFIG_HOME is ignored there), and it also turns off the
 /// legacy-cache reads. It runs from the platform initializer list below,
-/// before `main` and so before the test harness starts any thread: the
-/// `set_var` cannot race a `getenv`, and the cursor-sync `EngineEnv` saves
-/// and restores this dir, not unset.
+/// before `main` and so before the test harness starts any thread, so this
+/// one write cannot race a `getenv` (tests that set variables themselves,
+/// like the cursor-sync `EngineEnv`, are outside that claim; `EngineEnv`
+/// restores this dir, not unset).
 ///
 /// Each dir holds a lock file locked for the life of its process; dirs whose
-/// lock is free belong to finished runs and are swept here. The sweep keeps
-/// that lock until both are removed, so a process reusing the pid blocks
-/// instead of creating its dir mid-removal; a dir with no lock file is left.
+/// lock is free belong to finished runs and are swept here, holding that lock
+/// through the removal. Not airtight: two sweeps that opened the same lock
+/// file can still race a process reusing the pid. A dir whose lock file is
+/// gone is left in place. Any failure skips isolation rather than aborting
+/// the binary before `main`; the test below then reports it.
 #[cfg(test)]
 extern "C" fn isolate_test_config() {
     use fs2::FileExt;
@@ -108,10 +111,13 @@ extern "C" fn isolate_test_config() {
     }
     // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
     let dir = tmp.join(format!("{prefix}{}", std::process::id()));
-    let lock = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
-        .expect("create test config lock");
-    lock.lock_exclusive().expect("lock test config dir");
-    std::fs::create_dir_all(&dir).expect("create test config dir");
+    let Ok(lock) = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
+    else {
+        return;
+    };
+    if lock.lock_exclusive().is_err() || std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
     // SAFETY: called once from the initializer list, single-threaded, before `main`.
     unsafe { std::env::set_var("TOKSCALE_CONFIG_DIR", &dir) };
     let _ = TEST_CONFIG_LOCK.set(Some(lock));
@@ -122,8 +128,8 @@ extern "C" fn isolate_test_config() {
 static TEST_CONFIG_LOCK: std::sync::OnceLock<Option<std::fs::File>> = std::sync::OnceLock::new();
 
 // The libtest harness has no pre-thread hook, so register with the loader's
-// initializer list (what the `ctor` crate does) instead of adding a dependency
-// to a crate the Windows repo copies byte for byte.
+// initializer list, which is what the `ctor` crate does, rather than add a
+// dependency for one test-only hook.
 #[cfg(test)]
 #[used]
 #[cfg_attr(target_vendor = "apple", link_section = "__DATA,__mod_init_func")]
@@ -1655,12 +1661,13 @@ mod tests {
     static QUOTA_CURVE_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     /// Nothing calls `isolate_test_config` but the loader, so a platform that
-    /// skips the initializer list would put scans back on the real cache silently.
+    /// skips the initializer list, or a temp dir it cannot create, would put
+    /// scans back on the real cache silently.
     #[test]
-    fn the_test_config_isolation_ran_before_main() {
+    fn the_test_config_is_isolated() {
         assert!(
             TEST_CONFIG_LOCK.get().is_some(),
-            "isolate_test_config never ran"
+            "isolate_test_config did not run or could not create its dir"
         );
     }
 
