@@ -64,6 +64,87 @@ pub(crate) fn user_home_dir() -> Option<PathBuf> {
     )
 }
 
+/// The engine's source-message cache follows the process config dir, not the
+/// fixture home, so a test that scans would read and rewrite the developer's
+/// real `~/.config/tokscale` cache: 185s with the real HOME against 8.7s with
+/// a clean one. One temp dir per test process keeps the cold write once
+/// instead of per test.
+///
+/// TOKSCALE_CONFIG_DIR because it is the only switch `get_config_dir` honours
+/// on macOS (XDG_CONFIG_HOME is ignored there), and it also turns off the
+/// legacy-cache reads. It runs from the platform initializer list below,
+/// before `main` and so before the test harness starts any thread, so this
+/// one write cannot race a `getenv` (tests that set variables themselves,
+/// like the cursor-sync `EngineEnv`, are outside that claim; `EngineEnv`
+/// restores this dir, not unset).
+///
+/// Each dir is named after its lock file, created exclusively under a random
+/// name (a predictable path in a shared temp dir could be a planted symlink)
+/// and locked for the life of its process; dirs whose lock is free belong to
+/// finished runs and are swept here. A dir whose lock file is gone is left in
+/// place. Any failure skips isolation rather than aborting the binary before
+/// `main`; the test below then reports it.
+#[cfg(test)]
+extern "C" fn isolate_test_config() {
+    use fs2::FileExt;
+    // An explicit override (the tail benchmark) wins.
+    if std::env::var_os("TOKSCALE_CONFIG_DIR").is_some() {
+        let _ = TEST_CONFIG_LOCK.set(None);
+        return;
+    }
+    let tmp = std::env::temp_dir();
+    let prefix = "tb_core_ffi-test-config-";
+    for entry in std::fs::read_dir(&tmp).into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with(prefix) || name.ends_with(".lock") {
+            continue;
+        }
+        let lock_path = tmp.join(format!("{name}.lock"));
+        let Ok(lock) = std::fs::File::open(&lock_path) else {
+            continue;
+        };
+        if lock.try_lock_exclusive().is_ok() {
+            let _ = std::fs::remove_dir_all(entry.path());
+            let _ = std::fs::remove_file(&lock_path);
+        }
+    }
+    // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
+    let Ok((lock, lock_path)) = tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(".lock")
+        .tempfile_in(&tmp)
+        .map_err(drop)
+        .and_then(|file| file.keep().map_err(drop))
+    else {
+        return;
+    };
+    let dir = lock_path.with_extension("");
+    if lock.lock_exclusive().is_err() || std::fs::create_dir(&dir).is_err() {
+        return;
+    }
+    // SAFETY: called once from the initializer list, single-threaded, before `main`.
+    unsafe { std::env::set_var("TOKSCALE_CONFIG_DIR", &dir) };
+    let _ = TEST_CONFIG_LOCK.set(Some(lock));
+}
+
+/// Set by `isolate_test_config`; `None` when an explicit override was kept.
+#[cfg(test)]
+static TEST_CONFIG_LOCK: std::sync::OnceLock<Option<std::fs::File>> = std::sync::OnceLock::new();
+
+// The libtest harness has no pre-thread hook, so register with the loader's
+// initializer list, which is what the `ctor` crate does, rather than add a
+// dependency for one test-only hook.
+#[cfg(test)]
+#[used]
+#[cfg_attr(target_vendor = "apple", link_section = "__DATA,__mod_init_func")]
+#[cfg_attr(
+    any(target_os = "linux", target_os = "android", target_os = "freebsd"),
+    link_section = ".init_array"
+)]
+#[cfg_attr(windows, link_section = ".CRT$XCU")]
+static ISOLATE_TEST_CONFIG: extern "C" fn() = isolate_test_config;
+
 /// Snapshot the local source roots used by every FFI report and parse path.
 /// Environment roots are process-startup configuration: changing them requires
 /// restarting the FFI process. Cache keys intentionally do not fingerprint roots.
@@ -1583,6 +1664,17 @@ mod tests {
     use usage_tail::UsageTailer;
 
     static QUOTA_CURVE_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    /// Nothing calls `isolate_test_config` but the loader, so a platform that
+    /// skips the initializer list, or a temp dir it cannot create, would put
+    /// scans back on the real cache silently.
+    #[test]
+    fn the_test_config_is_isolated() {
+        assert!(
+            TEST_CONFIG_LOCK.get().is_some(),
+            "isolate_test_config did not run or could not create its dir"
+        );
+    }
 
     /// Drives the real `extern "C"` symbol rather than `set_from_json`, so the
     /// envelope encoding, the NUL check and the UTF-8 check are all exercised

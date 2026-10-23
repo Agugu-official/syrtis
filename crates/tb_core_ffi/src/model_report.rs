@@ -804,4 +804,11 @@ mod tests {
         assert_eq!(json["entries"][0]["costEstimate"], serde_json::json!(1.0));
         assert!(json["entries"][1]["costEstimate"].is_null());
     }
+
+    #[test]
+    fn normalize_year_accepts_only_four_digits() {
+        assert_eq!(normalize_year(""), Ok(None));
+        assert_eq!(normalize_year(" 2026 "), Ok(Some("2026".to_string())));
+        assert!(normalize_year("26").is_err());
+    }
 }

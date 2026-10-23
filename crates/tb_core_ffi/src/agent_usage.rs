@@ -3945,8 +3945,11 @@ fn load_claude_credentials_from_keychain_item(
     claude_keychain_item_output(output.status.code(), output.stdout)
 }
 
+// Call sites pass the keychain service on every platform; the stub must take
+// the same arguments or tb_core_ffi does not compile off macOS.
 #[cfg(not(target_os = "macos"))]
 fn load_claude_credentials_from_keychain_item(
+    _service: &str,
     _account: Option<&str>,
 ) -> Result<Option<String>, String> {
     Ok(None)
@@ -8458,6 +8461,14 @@ mod tests {
                 provider.id.as_str()
             );
         }
+        // A Codex window alone is a success, with no credits reading.
+        let mut codex_without_credits = table_test_snapshot(ProviderId::Codex);
+        codex_without_credits.credits = None;
+        codex_without_credits.windows = vec![card("session.v1")];
+        assert!(
+            usable_success(&codex_without_credits),
+            "a Codex window without a credits reading is still a success"
+        );
         // Control: the same success shape under the test-only fixture id is
         // refused, so a success shape alone does not make an arm pass.
         let mut stranger = table_test_snapshot(ProviderId::Test("not-a-provider"));
@@ -14483,6 +14494,43 @@ mod tests {
                 assert!(!wire.contains(sentinel), "{wire}");
             }
         }
+    }
+
+    #[test]
+    fn unavailable_pace_rejects_a_historical_projection() {
+        let mut snapshot = table_test_snapshot(ProviderId::Test("unavailable-with-history"));
+        let window = &mut snapshot.windows[0];
+        window.duration_seconds = None;
+        window.duration_source = None;
+        window.window_minutes = None;
+        window.pace_status.state = PaceState::Unavailable;
+        window.pace_status.reason = Some("missingReset".to_string());
+        window.pace_status.duration_seconds = None;
+        window.pace_status.duration_source = None;
+        window.pace_status.complete_cycles = 0;
+        window.historical_pace = Some(HistoricalPacePayload {
+            expected_used_percent: 10.0,
+            eta_seconds: None,
+            will_last_to_reset: true,
+            run_out_probability: None,
+        });
+        assert_eq!(
+            window.validate_wire().unwrap_err(),
+            "unavailable pace invariant failed"
+        );
+    }
+
+    #[test]
+    fn percent_encode_uses_plus_for_spaces() {
+        assert_eq!(percent_encode("a b&c"), "a+b%26c");
+        assert_eq!(percent_encode("AZaz09-_.~"), "AZaz09-_.~");
+    }
+
+    #[test]
+    fn a_fresh_codex_token_does_not_need_refresh() {
+        let fresh = codex_test_access_token((Utc::now() + chrono::Duration::days(30)).timestamp());
+        assert!(!codex_credentials_needs_refresh(&fresh, Some(Utc::now())));
+        assert!(codex_credentials_needs_refresh("not-a-jwt", None));
     }
 }
 

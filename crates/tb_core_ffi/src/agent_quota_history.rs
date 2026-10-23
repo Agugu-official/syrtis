@@ -10716,4 +10716,42 @@ mod tests {
         assert_eq!(before_result.pace, after_result.pace);
         assert!(before_result.pace.is_some());
     }
+
+    #[test]
+    fn migration_counts_rejected_legacy_samples() {
+        let (directory, v3_path) = temp_path("migration-rejected-sample");
+        let v2_path = directory.join(LEGACY_V2_FILE_NAME);
+        let now = 6_500_000_000_i64;
+        let duration = 10_080 * 60;
+        let reset = now - 2 * duration;
+        fs::write(
+            &v2_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion": 2,
+                "samples": [{
+                    "accountKey": "acct",
+                    "resetsAt": reset,
+                    "windowMinutes": 10080,
+                    "usedPercent": 150.0,
+                    "sampledAt": reset - duration
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let outcome = migrate_codex_v2_at_paths(
+            "acct",
+            &HistoryScope::for_test("scope"),
+            now,
+            &v2_path,
+            &v3_path,
+        )
+        .unwrap();
+        assert_eq!(outcome.imported_samples, 0);
+        assert_eq!(
+            outcome.skipped_samples, 1,
+            "the rejected legacy sample was not counted as skipped"
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
 }

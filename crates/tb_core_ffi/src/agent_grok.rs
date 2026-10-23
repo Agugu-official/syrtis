@@ -2888,4 +2888,25 @@ mod tests {
         }
         scope.cleanup();
     }
+
+    #[test]
+    fn valid_unexpired_credentials_do_not_need_refresh() {
+        let at = now();
+        let mut credentials = test_credentials();
+        credentials.access_token = "fresh".into();
+        credentials.expires_at = Some(at + chrono::Duration::hours(1));
+        assert!(
+            !credentials_needs_refresh(&credentials, at),
+            "an unexpired token was refreshed anyway"
+        );
+
+        // An empty access token always refreshes.
+        credentials.access_token = "  ".into();
+        assert!(credentials_needs_refresh(&credentials, at));
+
+        // Unknown expiry tries the current token first.
+        credentials.access_token = "fresh".into();
+        credentials.expires_at = None;
+        assert!(!credentials_needs_refresh(&credentials, at));
+    }
 }
