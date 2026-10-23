@@ -5405,7 +5405,7 @@ enum SelfTest {
                 mainVisible: false, clientVisibility: ["codex": true, "claude": true]) == .client("claude")
             && ClientTray.popoverAnchor(mainVisible: false, clientVisibility: ["codex": false]) == nil,
             "a programmatic open anchors to a visible client item as that client, never as main")
-        for (percent, countdown) in [("48%", "4d 23h"), ("100%", "59m"), ("9%", "resetting")] {
+        for (percent, countdown) in [("48%", "4d 23h"), ("100%", "59m"), ("9%", "Resetting".localized)] {
             let compact = CompactClientStatusView.Layout(
                 percent: percent, countdown: countdown, color: .white)
             let single = NSAttributedString(
