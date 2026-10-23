@@ -20,8 +20,10 @@
 //!
 //! One lookup serves both generations. A readable v2 store is authoritative: a
 //! missing row is a signed-out integration, never a reason to resurrect the
-//! legacy file. Without a v2 store the `auth.json` path behaves exactly as
-//! before. Credentials from the two stores carry different `semantic_source`
+//! legacy file. A store whose `credential` table then fails to read is a
+//! storage failure (`Terminal`, no subscription labels), not a fallback.
+//! Without a v2 store the `auth.json` path behaves exactly as before.
+//! Credentials from the two stores carry different `semantic_source`
 //! values, so their cache lineage never merges.
 
 use serde::Deserialize;
@@ -49,8 +51,10 @@ pub fn detect_subscriptions() -> Vec<String> {
 
 fn detect_subscriptions_in(dir: &Path) -> Vec<String> {
     match load_credential_store(dir) {
-        Some(rows) => subscription_labels_from_store(&rows),
-        None => legacy_subscription_labels(dir),
+        CredentialStore::Rows(rows) => subscription_labels_from_store(&rows),
+        // The legacy file is stale once v2 owns the credentials.
+        CredentialStore::Unreadable => Vec::new(),
+        CredentialStore::Absent => legacy_subscription_labels(dir),
     }
 }
 
@@ -152,12 +156,21 @@ struct StoredCredential {
     created_at: i64,
 }
 
-/// Every credential v2 has stored, or `None` when this machine has no v2 store
-/// at all (no database, or none carrying the `credential` table) — the v1
-/// layout. `Some` is authoritative for every integration: v2's `auth logout`
-/// deletes the row while a legacy `auth.json` keeps its pre-migration entries
-/// forever, so a missing row means signed out, never "read the older file".
-fn load_credential_store(dir: &Path) -> Option<Vec<StoredCredential>> {
+enum CredentialStore {
+    /// No database carrying the `credential` table: the v1 layout.
+    Absent,
+    /// Every credential v2 has stored. Authoritative for every integration:
+    /// v2's `auth logout` deletes the row while a legacy `auth.json` keeps its
+    /// pre-migration entries forever, so a missing row means signed out, never
+    /// "read the older file".
+    Rows(Vec<StoredCredential>),
+    /// A database carried the table but then failed to query or decode. The
+    /// rows read so far are partial, and partial rows would pass for a logout
+    /// or an older credential, so callers report this instead.
+    Unreadable,
+}
+
+fn load_credential_store(dir: &Path) -> CredentialStore {
     let mut store_present = false;
     let mut rows = Vec::new();
     for db_path in credential_db_candidates(dir) {
@@ -165,37 +178,48 @@ fn load_credential_store(dir: &Path) -> Option<Vec<StoredCredential>> {
             continue;
         };
         store_present = true;
-        let Ok(mut statement) =
-            conn.prepare("SELECT id, integration_id, value, active, time_created FROM credential")
-        else {
-            continue;
-        };
-        let Ok(stored) = statement.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        }) else {
-            continue;
-        };
-        for (id, integration_id, value, active, created_at) in stored.flatten() {
-            let Some(integration_id) = integration_id.filter(|id| !id.is_empty()) else {
-                continue;
-            };
-            rows.push(StoredCredential {
-                db_path: db_path.clone(),
-                id,
-                integration_id,
-                value,
-                active,
-                created_at,
-            });
+        if read_credential_rows(&conn, &db_path, &mut rows).is_err() {
+            return CredentialStore::Unreadable;
         }
     }
-    store_present.then_some(rows)
+    if store_present {
+        CredentialStore::Rows(rows)
+    } else {
+        CredentialStore::Absent
+    }
+}
+
+fn read_credential_rows(
+    conn: &rusqlite::Connection,
+    db_path: &Path,
+    rows: &mut Vec<StoredCredential>,
+) -> rusqlite::Result<()> {
+    let mut statement =
+        conn.prepare("SELECT id, integration_id, value, active, time_created FROM credential")?;
+    let stored = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    for row in stored {
+        let (id, integration_id, value, active, created_at) = row?;
+        let Some(integration_id) = integration_id.filter(|id| !id.is_empty()) else {
+            continue;
+        };
+        rows.push(StoredCredential {
+            db_path: db_path.to_path_buf(),
+            id,
+            integration_id,
+            value,
+            active,
+            created_at,
+        });
+    }
+    Ok(())
 }
 
 /// The row that represents an integration right now. Databases are preferred
@@ -241,7 +265,10 @@ fn credential_db_candidates(dir: &Path) -> Vec<PathBuf> {
         .iter()
         .position(|path| path.file_name().is_some_and(|name| name == "opencode.db"))
     {
-        dbs.swap(0, position);
+        // Not swap: `-` sorts before `.`, so the default is last and a swap
+        // would move the first channel to the end.
+        let default = dbs.remove(position);
+        dbs.insert(0, default);
     }
     dbs
 }
@@ -414,8 +441,14 @@ pub(crate) fn github_copilot_credential() -> GitHubCopilotCredentialLoad {
 }
 
 fn github_copilot_credential_in(dir: &Path) -> GitHubCopilotCredentialLoad {
-    let Some(rows) = load_credential_store(dir) else {
-        return github_copilot_credential_at(&dir.join("auth.json"));
+    let rows = match load_credential_store(dir) {
+        CredentialStore::Rows(rows) => rows,
+        CredentialStore::Absent => return github_copilot_credential_at(&dir.join("auth.json")),
+        CredentialStore::Unreadable => {
+            return GitHubCopilotCredentialLoad::Terminal(
+                "OpenCode credential database could not be read.".to_string(),
+            );
+        }
     };
     let Some(row) = select_credential(&rows, "github-copilot") else {
         return GitHubCopilotCredentialLoad::Absent;
@@ -537,8 +570,14 @@ pub(crate) fn opencode_go_credential() -> OpenCodeGoCredentialLoad {
 }
 
 fn opencode_go_credential_in(dir: &Path) -> OpenCodeGoCredentialLoad {
-    let Some(rows) = load_credential_store(dir) else {
-        return opencode_go_credential_at(&dir.join("auth.json"));
+    let rows = match load_credential_store(dir) {
+        CredentialStore::Rows(rows) => rows,
+        CredentialStore::Absent => return opencode_go_credential_at(&dir.join("auth.json")),
+        CredentialStore::Unreadable => {
+            return OpenCodeGoCredentialLoad::Terminal(
+                "OpenCode credential database could not be read.".to_string(),
+            );
+        }
     };
     let Some(row) = select_credential(&rows, "opencode-go") else {
         return OpenCodeGoCredentialLoad::Absent;
@@ -1178,6 +1217,60 @@ mod tests {
             _ => panic!("expected the default database credential"),
         }
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn channel_databases_stay_sorted_behind_the_default() {
+        let dir = fixture_dir("channel-order");
+        for file in ["opencode-stable.db", "opencode.db", "opencode-beta.db"] {
+            std::fs::write(dir.join(file), b"").unwrap();
+        }
+        let names: Vec<String> = credential_db_candidates(&dir)
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["opencode.db", "opencode-beta.db", "opencode-stable.db"]
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn credential_table_that_fails_to_read_is_terminal_not_a_fallback() {
+        // The legacy file still names a key and a subscription; reading it
+        // would resurrect credentials v2 may have rotated or signed out.
+        for (label, schema) in [
+            // `prepare` fails: a column the query selects is missing.
+            ("db-missing-column", "CREATE TABLE `credential` (`id` text, `integration_id` text, `value` text, `time_created` integer);"),
+            // A row fails to decode: `time_created` holds text.
+            ("db-bad-row", "CREATE TABLE `credential` (`id` text, `integration_id` text, `value` text, `active` integer, `time_created`); INSERT INTO credential VALUES ('row-0', 'opencode-go', '{\"type\":\"key\",\"key\":\"sk-go\"}', 1, 'not a time');"),
+        ] {
+            let dir = fixture_dir(label);
+            let conn = rusqlite::Connection::open(dir.join("opencode.db")).unwrap();
+            conn.execute_batch(schema).unwrap();
+            drop(conn);
+            std::fs::write(
+                dir.join("auth.json"),
+                r#"{"opencode-go":{"type":"api","key":"sk-go-legacy"},
+                    "github-copilot":{"type":"oauth","refresh":"gho-legacy"},
+                    "anthropic":{"type":"oauth","refresh":"legacy"}}"#,
+            )
+            .unwrap();
+            assert!(
+                matches!(opencode_go_credential_in(&dir), OpenCodeGoCredentialLoad::Terminal(_)),
+                "{label}: Go"
+            );
+            assert!(
+                matches!(
+                    github_copilot_credential_in(&dir),
+                    GitHubCopilotCredentialLoad::Terminal(_)
+                ),
+                "{label}: Copilot"
+            );
+            assert!(detect_subscriptions_in(&dir).is_empty(), "{label}: subscriptions");
+            std::fs::remove_dir_all(dir).unwrap();
+        }
     }
 
     #[test]
