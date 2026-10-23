@@ -60,8 +60,9 @@ pub struct AgentUsagePayload {
     publication_generation: u64,
     agents: Vec<AgentUsageSnapshot>,
     /// Subscription-type providers opencode is authenticated against (its
-    /// `auth.json` `type: "oauth"` entries), e.g. ["Codex", "Copilot"]. Surfaced
-    /// so the user can see which agent subscriptions opencode also draws on.
+    /// credential store's `type: "oauth"` entries), e.g. ["Codex", "Copilot"].
+    /// Surfaced so the user can see which agent subscriptions opencode also
+    /// draws on.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     opencode_subscriptions: Vec<String>,
 }
@@ -1686,7 +1687,7 @@ pub(crate) const QUOTA_PROVIDERS: &[QuotaProvider] = &[
         id: ProviderId::Kiro,
         fetch: |id| provider_fetch(async move { fetch_kiro(id).await.into_iter().collect() }),
     },
-    // OpenCode Go only appears when opencode auth.json holds an "opencode-go" api key.
+    // OpenCode Go only appears when opencode's credential store holds an "opencode-go" api key.
     QuotaProvider {
         id: ProviderId::OpenCode,
         fetch: |id| provider_fetch(async move { fetch_opencode_go(id).await.into_iter().collect() }),
@@ -2929,14 +2930,9 @@ async fn fetch_claude_oauth_usage(
             })
         },
         |credentials| async move {
-            // `refresh_claude_credentials` reloads from, validates against and
-            // writes back to the PRIMARY directory's Keychain item and
-            // `~/.claude/.credentials.json` — both hardcoded. Running it for an
-            // isolated account would overwrite the primary's stored credential
-            // with this account's rotated tokens, logging the primary out.
-            if credentials.scope_slot.semantic_source == CLAUDE_CONFIG_DIR_KEYCHAIN_SOURCE {
-                return Err(ProviderFetchFailure::terminal(CLAUDE_EXTRA_EXPIRED_ERROR));
-            }
+            // Reload, target validation and write-back all follow the Keychain
+            // item `claude_keychain_service_of` names, so an isolated account
+            // rotates its own item and never touches the primary's.
             refresh_claude_credentials(&credentials).await
         },
         move |credentials, account_scope, cache_binding| async move {
@@ -3607,9 +3603,6 @@ const CLAUDE_SETUP_KEYCHAIN_EMPTY_ERROR: &str = "The Syrtis setup-token Keychain
 /// setup-token fallback for an isolated account, and naming one would send the
 /// user to a credential that belongs to the other account.
 const CLAUDE_EXTRA_UNCONFIGURED_ERROR: &str = "No Claude login found for this config directory. Run `claude` with CLAUDE_CONFIG_DIR set to it.";
-/// Syrtis refreshes only the primary directory's credential in place, so an
-/// isolated account's expired token has to be rotated by Claude Code itself.
-const CLAUDE_EXTRA_EXPIRED_ERROR: &str = "Claude credentials for this config directory have expired. Run `claude` with CLAUDE_CONFIG_DIR set to it.";
 
 /// Full-login credentials: structured `claudeAiOauth` blobs (Keychain
 /// `Claude Code-credentials`, then `~/.claude/.credentials.json`) plus the
@@ -3917,6 +3910,18 @@ fn claude_keychain_service(config_dir: Option<&str>) -> String {
     }
 }
 
+/// The Keychain item a Keychain-sourced credential was read from and must be
+/// written back to. An isolated config directory's credential carries its
+/// hashed service in the scope slot (`load_claude_config_dir_credentials_with`
+/// re-points it); every other Keychain credential is the primary's.
+fn claude_keychain_service_of(credentials: &ClaudeCredentials) -> &str {
+    if credentials.scope_slot.semantic_source == CLAUDE_CONFIG_DIR_KEYCHAIN_SOURCE {
+        &credentials.scope_slot.canonical_location
+    } else {
+        CLAUDE_KEYCHAIN_SERVICE
+    }
+}
+
 fn load_claude_credentials_from_keychain() -> Result<Option<String>, String> {
     load_claude_credentials_from_keychain_for(None)
 }
@@ -3945,8 +3950,11 @@ fn load_claude_credentials_from_keychain_item(
     claude_keychain_item_output(output.status.code(), output.stdout)
 }
 
+// Call sites pass the keychain service on every platform; the stub must take
+// the same arguments or tb_core_ffi does not compile off macOS.
 #[cfg(not(target_os = "macos"))]
 fn load_claude_credentials_from_keychain_item(
+    _service: &str,
     _account: Option<&str>,
 ) -> Result<Option<String>, String> {
     Ok(None)
@@ -4315,19 +4323,35 @@ async fn refresh_claude_credentials(
     ),
     ProviderFetchFailure,
 > {
-    let refresh = agent_account_scope::begin_refresh("claude").map_err(|_| {
-        ProviderFetchFailure::terminal("Claude credential refresh lock is unavailable.")
-    })?;
-    refresh_claude_credentials_with(
-        original,
-        &refresh,
-        reload_claude_credentials,
-        request_claude_refresh,
-        validate_claude_refresh_target,
-        save_claude_credentials,
-        |_| Ok(()),
-    )
+    with_claude_refresh_gate(async {
+        let refresh = agent_account_scope::begin_refresh("claude").map_err(|_| {
+            ProviderFetchFailure::terminal("Claude credential refresh lock is unavailable.")
+        })?;
+        refresh_claude_credentials_with(
+            original,
+            &refresh,
+            reload_claude_credentials,
+            request_claude_refresh,
+            validate_claude_refresh_target,
+            save_claude_credentials,
+            |_| Ok(()),
+        )
+        .await
+    })
     .await
+}
+
+/// Every Claude account of one publication runs on the same `LocalSet`
+/// thread (`fetch_claude_accounts` → `join_local_ordered`), and
+/// `begin_refresh("claude")` holds a blocking `std::sync::Mutex` across the
+/// refresh request. A second expired account reaching that lock would block
+/// the only thread while the first awaits its response, and the publication
+/// would never return. Waiting here yields instead.
+static CLAUDE_REFRESH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn with_claude_refresh_gate<F: Future>(refresh: F) -> F::Output {
+    let _gate = CLAUDE_REFRESH_GATE.lock().await;
+    refresh.await
 }
 
 async fn request_claude_refresh(
@@ -4511,30 +4535,12 @@ where
 }
 
 fn reload_claude_credentials(original: &ClaudeCredentials) -> Result<ClaudeCredentials, String> {
-    // Every arm below reads a location belonging to the primary directory. A
-    // credential from an isolated config directory carries `Keychain` as its
-    // source but lives in a different item, so it would silently be replaced
-    // by the primary's — and then written back under the primary's identity.
-    if original.scope_slot.semantic_source == CLAUDE_CONFIG_DIR_KEYCHAIN_SOURCE {
-        return Err(
-            "Claude credentials from an isolated config directory are not refreshed in place."
-                .to_string(),
-        );
-    }
     match original.source {
-        ClaudeCredentialSource::Keychain => {
-            let account = claude_keychain_account().ok_or_else(|| {
-                "Claude Keychain account could not be captured during refresh.".to_string()
-            })?;
-            let raw =
-                load_claude_credentials_from_keychain_item(CLAUDE_KEYCHAIN_SERVICE, Some(&account))?.ok_or_else(|| {
-                    "Claude Keychain credentials disappeared during refresh.".to_string()
-                })?;
-            let mut credentials =
-                parse_claude_credentials_data(&raw, ClaudeCredentialSource::Keychain)?;
-            credentials.keychain_account = Some(account);
-            Ok(credentials)
-        }
+        ClaudeCredentialSource::Keychain => reload_claude_keychain_credentials_with(
+            original,
+            claude_keychain_account,
+            |service, account| load_claude_credentials_from_keychain_item(service, Some(account)),
+        ),
         ClaudeCredentialSource::File => {
             let raw = fs::read_to_string(claude_credentials_path())
                 .map_err(|e| format!("reload Claude credentials file: {e}"))?;
@@ -4544,6 +4550,35 @@ fn reload_claude_credentials(original: &ClaudeCredentials) -> Result<ClaudeCrede
             Err("Claude environment credentials cannot be refreshed in place.".to_string())
         }
     }
+}
+
+/// Reload a Keychain credential from the exact item it came from. An isolated
+/// config directory's item is not the primary's, and reading the primary's
+/// here would rotate it under this account's identity.
+fn reload_claude_keychain_credentials_with<Account, Item>(
+    original: &ClaudeCredentials,
+    account_of: Account,
+    item: Item,
+) -> Result<ClaudeCredentials, String>
+where
+    Account: FnOnce(&str) -> Option<String>,
+    Item: FnOnce(&str, &str) -> Result<Option<String>, String>,
+{
+    let service = claude_keychain_service_of(original);
+    let account = account_of(service).ok_or_else(|| {
+        "Claude Keychain account could not be captured during refresh.".to_string()
+    })?;
+    let raw = item(service, &account)?
+        .ok_or_else(|| "Claude Keychain credentials disappeared during refresh.".to_string())?;
+    let mut credentials = parse_claude_credentials_data(&raw, ClaudeCredentialSource::Keychain)?;
+    credentials.keychain_account = Some(account);
+    // `parse_claude_credentials_data` names the primary's slot; an isolated
+    // directory's credential keeps its own so lineage and write-back stay on
+    // this item.
+    if original.scope_slot.semantic_source == CLAUDE_CONFIG_DIR_KEYCHAIN_SOURCE {
+        credentials.scope_slot = original.scope_slot.clone();
+    }
+    Ok(credentials)
 }
 
 fn claude_refresh_target_failure(error: RefreshTargetError) -> ProviderFetchFailure {
@@ -4834,11 +4869,12 @@ where
 fn validate_claude_keychain_target(
     credentials: &ClaudeCredentials,
 ) -> Result<(), RefreshTargetError> {
+    let service = claude_keychain_service_of(credentials);
     claude_keychain_target_with(
         credentials,
-        || Ok(claude_keychain_account()),
+        || Ok(claude_keychain_account(service)),
         |captured_account| {
-            load_claude_credentials_from_keychain_item(CLAUDE_KEYCHAIN_SERVICE, Some(captured_account))
+            load_claude_credentials_from_keychain_item(service, Some(captured_account))
                 .map_err(|_| ())
         },
     )
@@ -4864,11 +4900,12 @@ where
 fn save_claude_credentials_to_keychain(
     credentials: &ClaudeCredentials,
 ) -> Result<(), RefreshTargetError> {
+    let service = claude_keychain_service_of(credentials);
     let (account, data) = prepare_claude_keychain_write_with(
         credentials,
-        || Ok(claude_keychain_account()),
+        || Ok(claude_keychain_account(service)),
         |captured_account| {
-            load_claude_credentials_from_keychain_item(CLAUDE_KEYCHAIN_SERVICE, Some(captured_account))
+            load_claude_credentials_from_keychain_item(service, Some(captured_account))
                 .map_err(|_| ())
         },
     )?;
@@ -4885,7 +4922,7 @@ fn save_claude_credentials_to_keychain(
             "add-generic-password",
             "-U",
             "-s",
-            CLAUDE_KEYCHAIN_SERVICE,
+            service,
             "-a",
             account,
             "-w",
@@ -4906,12 +4943,12 @@ fn save_claude_credentials_to_keychain(
     Err(RefreshTargetError::TargetUnverified)
 }
 
-/// Read the account name the Claude Keychain item is stored under so the
-/// write-back updates that same item instead of creating a duplicate.
+/// Read the account name `service`'s Claude Keychain item is stored under so
+/// the write-back updates that same item instead of creating a duplicate.
 #[cfg(target_os = "macos")]
-fn claude_keychain_account() -> Option<String> {
+fn claude_keychain_account(service: &str) -> Option<String> {
     let output = std::process::Command::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", CLAUDE_KEYCHAIN_SERVICE])
+        .args(["find-generic-password", "-s", service])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -4943,7 +4980,7 @@ fn claude_keychain_account() -> Option<String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn claude_keychain_account() -> Option<String> {
+fn claude_keychain_account(_service: &str) -> Option<String> {
     None
 }
 
@@ -6276,6 +6313,36 @@ mod tests {
     /// (push instead of the indexed slot) reverses the sequence; removing the
     /// `queued < MAX_ACCOUNT_FETCHES_IN_FLIGHT` bound lets all seven run at
     /// once and the observed peak becomes 7.
+    /// Two expired Claude accounts in one publication: the second refresh must
+    /// wait on the gate, not reach the blocking refresh lock while the first
+    /// holds it across an await. The stand-in lock uses `try_lock` so that
+    /// case fails the test instead of hanging it.
+    ///
+    /// Mutation, verified red: calling the closure without the gate makes the
+    /// second `try_lock` fail, its task panics, and one result is missing.
+    #[test]
+    fn concurrent_claude_refreshes_wait_instead_of_blocking_the_thread() {
+        static REFRESH_LOCK: Mutex<()> = Mutex::new(());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let finished = runtime.block_on(async {
+            let work: Vec<Pin<Box<dyn Future<Output = usize>>>> = (0..2usize)
+                .map(|index| {
+                    Box::pin(with_claude_refresh_gate(async move {
+                        let _held = REFRESH_LOCK
+                            .try_lock()
+                            .expect("a second refresh reached the blocking lock");
+                        tokio::task::yield_now().await;
+                        index
+                    })) as Pin<Box<dyn Future<Output = usize>>>
+                })
+                .collect();
+            join_local_ordered(work).await
+        });
+        assert_eq!(finished, [0, 1]);
+    }
+
     #[test]
     fn account_fetches_run_concurrently_bounded_and_return_in_input_order() {
         use std::cell::Cell;
@@ -8458,6 +8525,14 @@ mod tests {
                 provider.id.as_str()
             );
         }
+        // A Codex window alone is a success, with no credits reading.
+        let mut codex_without_credits = table_test_snapshot(ProviderId::Codex);
+        codex_without_credits.credits = None;
+        codex_without_credits.windows = vec![card("session.v1")];
+        assert!(
+            usable_success(&codex_without_credits),
+            "a Codex window without a credits reading is still a success"
+        );
         // Control: the same success shape under the test-only fixture id is
         // refused, so a success shape alone does not make an arm pass.
         let mut stranger = table_test_snapshot(ProviderId::Test("not-a-provider"));
@@ -13504,6 +13579,160 @@ mod tests {
         }
     }
 
+    #[test]
+    fn claude_keychain_service_of_follows_the_credentials_own_item() {
+        let config_dir = "/Users/test/.claude-extra";
+        let primary = ClaudeCredentials {
+            source: ClaudeCredentialSource::Keychain,
+            scope_slot: claude_login_scope_slot(ClaudeCredentialSource::Keychain).unwrap(),
+            ..claude_test_login_credentials()
+        };
+        assert_eq!(
+            claude_keychain_service_of(&primary),
+            CLAUDE_KEYCHAIN_SERVICE
+        );
+        let extra = claude_config_dir_test_credentials(config_dir);
+        assert_eq!(
+            claude_keychain_service_of(&extra),
+            claude_keychain_service(Some(config_dir))
+        );
+        assert_ne!(claude_keychain_service_of(&extra), CLAUDE_KEYCHAIN_SERVICE);
+    }
+
+    /// An isolated config directory's expired login rotates its own Keychain
+    /// item end to end — reload, target check and write-back all resolve the
+    /// hashed service — while the primary's item is neither read nor written.
+    #[tokio::test]
+    async fn claude_config_dir_refresh_rotates_only_its_own_keychain_item() {
+        let config_dir = "/Users/test/.claude-extra";
+        let extra_service = claude_keychain_service(Some(config_dir));
+        let extra_raw = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "extra-old-access",
+                "refreshToken": "extra-old-refresh",
+                "expiresAt": 0
+            },
+            "sibling": {"writer": "claude-cli"}
+        })
+        .to_string();
+        let primary_raw = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "primary-access",
+                "refreshToken": "primary-refresh",
+                "expiresAt": 0
+            }
+        })
+        .to_string();
+        let keychain: Mutex<std::collections::HashMap<String, (String, String)>> =
+            Mutex::new(std::collections::HashMap::from([
+                (
+                    CLAUDE_KEYCHAIN_SERVICE.to_string(),
+                    ("primary-user".to_string(), primary_raw.clone()),
+                ),
+                (
+                    extra_service.clone(),
+                    ("extra-user".to_string(), extra_raw.clone()),
+                ),
+            ]));
+        let account_of = |service: &str| {
+            keychain
+                .lock()
+                .unwrap()
+                .get(service)
+                .map(|(account, _)| account.clone())
+        };
+        let item_of = |service: &str, account: &str| -> Result<Option<String>, String> {
+            Ok(keychain
+                .lock()
+                .unwrap()
+                .get(service)
+                .filter(|(stored, _)| stored == account)
+                .map(|(_, raw)| raw.clone()))
+        };
+
+        let original = load_claude_config_dir_credentials_with(config_dir, |dir| {
+            assert_eq!(dir, Some(config_dir));
+            Ok(Some(extra_raw.clone()))
+        })
+        .unwrap();
+        let scope = TestRefreshScope::new("claude", "claude-config-dir-own-item");
+        let old_scope = scope
+            .resolve_current(
+                original.scope_slot.semantic_source,
+                &original.scope_slot.canonical_location,
+                original.scope_marker().unwrap(),
+            )
+            .unwrap();
+
+        let (refreshed, scope_outcome, cache_binding) = refresh_claude_credentials_with(
+            &original,
+            &scope,
+            |template| reload_claude_keychain_credentials_with(template, account_of, item_of),
+            |refresh_token, _attempt_binding| async move {
+                assert_eq!(refresh_token, "extra-old-refresh");
+                Ok(ClaudeRefreshResponse {
+                    access_token: "extra-new-access".to_string(),
+                    refresh_token: Some("extra-new-refresh".to_string()),
+                    expires_in: 3_600,
+                })
+            },
+            |credentials| {
+                let service = claude_keychain_service_of(credentials);
+                claude_keychain_target_with(
+                    credentials,
+                    || Ok(account_of(service)),
+                    |account| item_of(service, account).map_err(|_| ()),
+                )
+                .map(|_| ())
+            },
+            |credentials| {
+                let service = claude_keychain_service_of(credentials).to_string();
+                let (account, data) = prepare_claude_keychain_write_with(
+                    credentials,
+                    || Ok(account_of(&service)),
+                    |account| item_of(&service, account).map_err(|_| ()),
+                )?;
+                let account = account.to_string();
+                keychain.lock().unwrap().insert(service, (account, data));
+                Ok(())
+            },
+            checkpoint_at(None),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(refreshed.access_token, "extra-new-access");
+        assert_eq!(
+            refreshed.scope_slot.semantic_source,
+            CLAUDE_CONFIG_DIR_KEYCHAIN_SOURCE
+        );
+        assert_eq!(claude_keychain_service_of(&refreshed), extra_service);
+        assert_eq!(scope_outcome, old_scope);
+        assert_eq!(
+            cache_binding,
+            Some(ProviderCacheBinding::primary(old_scope.clone()))
+        );
+        let stored = keychain.lock().unwrap();
+        let (extra_account, extra_stored) = &stored[&extra_service];
+        assert_eq!(extra_account, "extra-user");
+        let extra_stored: Value = serde_json::from_str(extra_stored).unwrap();
+        assert_eq!(
+            extra_stored["claudeAiOauth"]["accessToken"],
+            "extra-new-access"
+        );
+        assert_eq!(
+            extra_stored["claudeAiOauth"]["refreshToken"],
+            "extra-new-refresh"
+        );
+        assert_eq!(extra_stored["sibling"]["writer"], "claude-cli");
+        assert_eq!(
+            stored[CLAUDE_KEYCHAIN_SERVICE],
+            ("primary-user".to_string(), primary_raw)
+        );
+        drop(stored);
+        scope.cleanup();
+    }
+
     /// One recordable session window, so `enrich_snapshot_with` produces an
     /// observation rather than skipping the snapshot for an unrelated reason.
     fn claude_identity_test_snapshot(
@@ -14483,6 +14712,43 @@ mod tests {
                 assert!(!wire.contains(sentinel), "{wire}");
             }
         }
+    }
+
+    #[test]
+    fn unavailable_pace_rejects_a_historical_projection() {
+        let mut snapshot = table_test_snapshot(ProviderId::Test("unavailable-with-history"));
+        let window = &mut snapshot.windows[0];
+        window.duration_seconds = None;
+        window.duration_source = None;
+        window.window_minutes = None;
+        window.pace_status.state = PaceState::Unavailable;
+        window.pace_status.reason = Some("missingReset".to_string());
+        window.pace_status.duration_seconds = None;
+        window.pace_status.duration_source = None;
+        window.pace_status.complete_cycles = 0;
+        window.historical_pace = Some(HistoricalPacePayload {
+            expected_used_percent: 10.0,
+            eta_seconds: None,
+            will_last_to_reset: true,
+            run_out_probability: None,
+        });
+        assert_eq!(
+            window.validate_wire().unwrap_err(),
+            "unavailable pace invariant failed"
+        );
+    }
+
+    #[test]
+    fn percent_encode_uses_plus_for_spaces() {
+        assert_eq!(percent_encode("a b&c"), "a+b%26c");
+        assert_eq!(percent_encode("AZaz09-_.~"), "AZaz09-_.~");
+    }
+
+    #[test]
+    fn a_fresh_codex_token_does_not_need_refresh() {
+        let fresh = codex_test_access_token((Utc::now() + chrono::Duration::days(30)).timestamp());
+        assert!(!codex_credentials_needs_refresh(&fresh, Some(Utc::now())));
+        assert!(codex_credentials_needs_refresh("not-a-jwt", None));
     }
 }
 

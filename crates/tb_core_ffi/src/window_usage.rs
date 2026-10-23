@@ -1264,4 +1264,32 @@ mod tests {
             cache_key(&PRIMARY, 1_700_000_000_000, 1_700_000_120_001)
         );
     }
+
+    /// An extra account's options must carry that account's directory, client
+    /// filter and scanner settings; dropping any field re-scopes the window.
+    #[test]
+    fn an_extra_account_report_is_rooted_at_that_account() {
+        let _guards = lock_registries();
+        reset_registries();
+        let fixture = account_fixture();
+        let context = crate::LocalSourceContext::for_home(fixture.home.clone());
+        let account = Some(fixture.d.display().to_string());
+
+        let report = account_options(&context, &account).expect("registered account");
+        assert_eq!(
+            report.home_dir.as_deref(),
+            Some(fixture.d.to_string_lossy().as_ref()),
+            "the extra account's report is not rooted at its own directory"
+        );
+        assert_eq!(report.clients, Some(vec![CLAUDE.to_string()]));
+
+        let parse = account_parse_options(&context, &account).expect("registered account");
+        assert_eq!(parse.home_dir, report.home_dir);
+        assert_eq!(parse.clients, report.clients);
+        assert_eq!(
+            parse.scanner_settings.extra_scan_paths,
+            report.scanner_settings.extra_scan_paths
+        );
+        reset_registries();
+    }
 }

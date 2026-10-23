@@ -851,4 +851,24 @@ mod tests {
         assert!(validate_observed_state(&state));
         assert_eq!(observed_duration(&state), Some(5 * HOUR));
     }
+
+    #[test]
+    fn watching_state_with_zero_consecutive_count_is_invalid() {
+        let reset = 10_000;
+        assert!(
+            !validate_observed_state(&ObservedState::Watching {
+                reset_at: reset,
+                first_seen_at: 0,
+                last_seen_at: reset - 1,
+                consecutive_count: 0,
+            }),
+            "a persisted watching state with no observations was accepted"
+        );
+        assert!(validate_observed_state(&ObservedState::Watching {
+            reset_at: reset,
+            first_seen_at: 0,
+            last_seen_at: reset - 1,
+            consecutive_count: 1,
+        }));
+    }
 }

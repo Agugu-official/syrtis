@@ -209,11 +209,12 @@ public enum UsageAttributionSettings {
     /// subscription the user never configured.
     ///
     /// `opencodeSubscriptions` is a second, independent statement of ownership:
-    /// opencode reports the providers its `auth.json` holds an oauth entry for,
-    /// and a user who reaches a subscription only that way has no snapshot of
-    /// their own — just the empty placeholder the filter above removes. Dropping
-    /// them would leave exactly those rows unable to name the subscription they
-    /// are known to consume, so the labels are folded back in as targets.
+    /// opencode reports the providers its credential store (v2 SQLite, else v1
+    /// `auth.json`) holds an oauth entry for, and a user who reaches a
+    /// subscription only that way has no snapshot of their own — just the empty
+    /// placeholder the filter above removes. Dropping them would leave exactly
+    /// those rows unable to name the subscription they are known to consume, so
+    /// the labels are folded back in as targets.
     public static func subscriptionClients(from payload: AgentUsagePayload?) -> [String] {
         var seen = Set<String>()
         let configured = (payload?.agents ?? []).compactMap { snapshot -> String? in
@@ -373,8 +374,9 @@ public enum UsageAttributionSettings {
     /// subscription clients they are authed against.
     ///
     /// opencode is the only one Syrtis can know this for, because its
-    /// `auth.json` oauth entries are reported as `opencodeSubscriptions`. That
-    /// declaration is what separates it from every other multi-provider source:
+    /// credential store's oauth entries are reported as
+    /// `opencodeSubscriptions`. That declaration is what separates it from
+    /// every other multi-provider source:
     /// a Cursor row is Cursor's own plan, but an opencode row was paid for by
     /// whichever subscription opencode is signed into. Without this the router's
     /// rows get no suggestion at all, and on real data opencode is the single

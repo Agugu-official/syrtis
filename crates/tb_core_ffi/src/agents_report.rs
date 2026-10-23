@@ -138,4 +138,20 @@ mod tests {
         let mapped = map_report(report);
         assert_eq!(mapped.entries[0].total, i64::MAX);
     }
+
+    #[test]
+    fn run_rejects_an_invalid_year_filter_before_scanning() {
+        let context =
+            crate::LocalSourceContext::for_home(std::path::PathBuf::from("/nonexistent-020-home"));
+        assert!(run(&context, "26", None).is_err());
+        assert!(run(&context, "abcd", None).is_err());
+    }
+
+    #[test]
+    fn normalize_year_accepts_only_four_digits() {
+        assert_eq!(normalize_year(""), Ok(None));
+        assert_eq!(normalize_year(" 2026 "), Ok(Some("2026".to_string())));
+        assert!(normalize_year("26").is_err());
+        assert!(normalize_year("20x6").is_err());
+    }
 }
