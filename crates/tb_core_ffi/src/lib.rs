@@ -78,12 +78,12 @@ pub(crate) fn user_home_dir() -> Option<PathBuf> {
 /// like the cursor-sync `EngineEnv`, are outside that claim; `EngineEnv`
 /// restores this dir, not unset).
 ///
-/// Each dir holds a lock file locked for the life of its process; dirs whose
-/// lock is free belong to finished runs and are swept here, holding that lock
-/// through the removal. Not airtight: two sweeps that opened the same lock
-/// file can still race a process reusing the pid. A dir whose lock file is
-/// gone is left in place. Any failure skips isolation rather than aborting
-/// the binary before `main`; the test below then reports it.
+/// Each dir is named after its lock file, created exclusively under a random
+/// name (a predictable path in a shared temp dir could be a planted symlink)
+/// and locked for the life of its process; dirs whose lock is free belong to
+/// finished runs and are swept here. A dir whose lock file is gone is left in
+/// place. Any failure skips isolation rather than aborting the binary before
+/// `main`; the test below then reports it.
 #[cfg(test)]
 extern "C" fn isolate_test_config() {
     use fs2::FileExt;
@@ -110,12 +110,17 @@ extern "C" fn isolate_test_config() {
         }
     }
     // Lock before the dir exists, so a concurrent sweep never sees the dir unlocked.
-    let dir = tmp.join(format!("{prefix}{}", std::process::id()));
-    let Ok(lock) = std::fs::File::create(tmp.join(format!("{prefix}{}.lock", std::process::id())))
+    let Ok((lock, lock_path)) = tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(".lock")
+        .tempfile_in(&tmp)
+        .map_err(drop)
+        .and_then(|file| file.keep().map_err(drop))
     else {
         return;
     };
-    if lock.lock_exclusive().is_err() || std::fs::create_dir_all(&dir).is_err() {
+    let dir = lock_path.with_extension("");
+    if lock.lock_exclusive().is_err() || std::fs::create_dir(&dir).is_err() {
         return;
     }
     // SAFETY: called once from the initializer list, single-threaded, before `main`.
