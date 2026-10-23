@@ -3,8 +3,9 @@
 //! Copilot has no token-usage log, but GitHub exposes a per-account quota at
 //! `/copilot_internal/user` (premium interactions + chat, as percent-remaining
 //! snapshots). We authenticate with the GitHub OAuth token opencode already
-//! stored for its Copilot login (`~/.local/share/opencode/auth.json`), so the
-//! card appears whenever Copilot is signed in there. Maps to `UsageWindow`s.
+//! stored for its Copilot login (v2's SQLite credential store, else the v1
+//! `~/.local/share/opencode/auth.json`), so the card appears whenever Copilot
+//! is signed in there. Maps to `UsageWindow`s.
 
 use crate::agent_account_scope::{self, AccountScope, AccountScopeError};
 use crate::agent_quota_duration::{copilot_calendar_duration, DurationEvidence};

@@ -4,7 +4,7 @@ id: kb-architecture
 kind: canonical
 scope: repository
 read_when: changing Rust parsing, the C ABI, Swift models, reports, cache, or filters
-last_verified: 2026-10-09
+last_verified: 2026-10-19
 sources: [".gitmodules", "Package.swift", "Makefile", "Sources/CTB/include/ctb.h", "crates/tb_core_ffi", "crates/tb_core_ffi/src/agent_account_scope.rs", "crates/tb_core_ffi/src/agent_quota_duration.rs", "crates/tb_core_ffi/src/agent_quota_history.rs", "Sources/TokenBarCore", "Sources/Syrtis", "docs/knowledge/plans/provider-quota-pace.md", "vendor/README.md", "public tokscale-core commit bb9a2a9", "public Syrtis PR #114", "public TokenBar-Windows PR #12", "public TokenBar-Windows PR #20"]
 ---
 
@@ -261,7 +261,9 @@ Pricing metadata is refreshable rather than frozen for the process lifetime; the
 
 **不在表裡的 client 代表尚未調查，不代表它不賣訂閱。** 這兩者的差別是承重的：`suggestionTarget` 對表裡沒有的來源回傳 nil（不建議），而非 `excluded`（斷言那是 API 支出）。缺席是無知，不是證據。
 
-**Router 不進表。** OpenRouter、LiteLLM、opencode、Roo Code、Goose 用的是你自己的 key 或別人的訂閱，自己不賣方案。opencode 是唯一有例外處理的：它的 `auth.json` oauth 條目經 `opencodeSubscriptions` 上報，`routedSubscriptions` 據此判定它實際簽入哪個訂閱——那是宣告的事實，不是推論。其餘 router 沒有等價訊號，因此不建議。
+**Router 不進表。** OpenRouter、LiteLLM、opencode、Roo Code、Goose 用的是你自己的 key 或別人的訂閱，自己不賣方案。opencode 是唯一有例外處理的：它的憑證 store（v2 SQLite `credential` 表；v1 `auth.json`）中 `type: "oauth"` 的條目經 `opencodeSubscriptions` 上報，`routedSubscriptions` 據此判定它實際簽入哪個訂閱——那是宣告的事實，不是推論。其餘 router 沒有等價訊號，因此不建議。
+
+OpenCode v2 的憑證選擇保留既有的資料庫優先序；同一資料庫、同一 integration 內依 `active`、`time_created`、`id` 由大到小選取，與 [OpenCode 的 credential 選取順序](https://github.com/anomalyco/opencode/blob/ba06ff9e0bf2dcefbbbc3a1d6094f3572d77c84e/packages/core/src/credential.ts) 一致。`time_updated` 不參與選取：重新命名或更新較舊的憑證不代表切換帳號，也不得改變 quota loader 或 `opencodeSubscriptions` 的來源。
 
 ## Swift presentation layer
 

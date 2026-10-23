@@ -18,8 +18,9 @@ public enum ClientRegistry {
         "gemini": ("Gemini CLI", "#60a5fa"),
         // The `opencode` client also carries the OpenCode Go subscription quota
         // card (ported from mana.bar's OpenCodeGoProvider), fed by the
-        // opencode-go api key in auth.json. No separate client id, mirroring how
-        // the Copilot quota feeds the `copilot` tab.
+        // opencode-go api key in opencode's credential store (v2 SQLite, else v1
+        // auth.json). No separate client id, mirroring how the Copilot quota
+        // feeds the `copilot` tab.
         "opencode": ("OpenCode", "#1f2937"),
         // No form-factor suffix on these three: their sources are not
         // surface-scoped. `codex` reads ~/.codex/sessions, written by Codex
