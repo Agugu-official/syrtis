@@ -4319,19 +4319,35 @@ async fn refresh_claude_credentials(
     ),
     ProviderFetchFailure,
 > {
-    let refresh = agent_account_scope::begin_refresh("claude").map_err(|_| {
-        ProviderFetchFailure::terminal("Claude credential refresh lock is unavailable.")
-    })?;
-    refresh_claude_credentials_with(
-        original,
-        &refresh,
-        reload_claude_credentials,
-        request_claude_refresh,
-        validate_claude_refresh_target,
-        save_claude_credentials,
-        |_| Ok(()),
-    )
+    with_claude_refresh_gate(async {
+        let refresh = agent_account_scope::begin_refresh("claude").map_err(|_| {
+            ProviderFetchFailure::terminal("Claude credential refresh lock is unavailable.")
+        })?;
+        refresh_claude_credentials_with(
+            original,
+            &refresh,
+            reload_claude_credentials,
+            request_claude_refresh,
+            validate_claude_refresh_target,
+            save_claude_credentials,
+            |_| Ok(()),
+        )
+        .await
+    })
     .await
+}
+
+/// Every Claude account of one publication runs on the same `LocalSet`
+/// thread (`fetch_claude_accounts` → `join_local_ordered`), and
+/// `begin_refresh("claude")` holds a blocking `std::sync::Mutex` across the
+/// refresh request. A second expired account reaching that lock would block
+/// the only thread while the first awaits its response, and the publication
+/// would never return. Waiting here yields instead.
+static CLAUDE_REFRESH_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn with_claude_refresh_gate<F: Future>(refresh: F) -> F::Output {
+    let _gate = CLAUDE_REFRESH_GATE.lock().await;
+    refresh.await
 }
 
 async fn request_claude_refresh(
@@ -6293,6 +6309,36 @@ mod tests {
     /// (push instead of the indexed slot) reverses the sequence; removing the
     /// `queued < MAX_ACCOUNT_FETCHES_IN_FLIGHT` bound lets all seven run at
     /// once and the observed peak becomes 7.
+    /// Two expired Claude accounts in one publication: the second refresh must
+    /// wait on the gate, not reach the blocking refresh lock while the first
+    /// holds it across an await. The stand-in lock uses `try_lock` so that
+    /// case fails the test instead of hanging it.
+    ///
+    /// Mutation, verified red: calling the closure without the gate makes the
+    /// second `try_lock` fail, its task panics, and one result is missing.
+    #[test]
+    fn concurrent_claude_refreshes_wait_instead_of_blocking_the_thread() {
+        static REFRESH_LOCK: Mutex<()> = Mutex::new(());
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let finished = runtime.block_on(async {
+            let work: Vec<Pin<Box<dyn Future<Output = usize>>>> = (0..2usize)
+                .map(|index| {
+                    Box::pin(with_claude_refresh_gate(async move {
+                        let _held = REFRESH_LOCK
+                            .try_lock()
+                            .expect("a second refresh reached the blocking lock");
+                        tokio::task::yield_now().await;
+                        index
+                    })) as Pin<Box<dyn Future<Output = usize>>>
+                })
+                .collect();
+            join_local_ordered(work).await
+        });
+        assert_eq!(finished, [0, 1]);
+    }
+
     #[test]
     fn account_fetches_run_concurrently_bounded_and_return_in_input_order() {
         use std::cell::Cell;
