@@ -5431,12 +5431,12 @@ enum SelfTest {
             ("9%", "59m"), ("57%", "2h 15m"), ("100%", "23h 59m"), ("48%", "29d 23h"),
             ("9%", "Resetting"), ("—%", "—"),
         ].map { CompactClientStatusView.Layout(percent: $0.0, countdown: $0.1, color: .white) }
-        expect(Set(stackedLayouts.map(\.width)).count == 1,
-            "stacked items keep one width across countdown ticks and the no-countdown placeholder")
-        expect(Set(stackedLayouts.map {
-            $0.frames(in: CGRect(x: 0, y: 0, width: $0.width, height: 22)).icon.minX
-        }).count == 1,
-            "the stacked icon stays in place as the countdown text changes")
+        expect(stackedLayouts.allSatisfy { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return abs(frames.icon.minX - layout.sidePadding) < 0.01
+                && abs(frames.text.minX - frames.icon.maxX - layout.iconGap) < 0.01
+        },
+            "the stacked item is tight to its text, so the icon gap stays 6 pt even beside \"—\"")
         // Baseline = glyph rect bottom minus that line's own ink offset. Laid
         // out from the current glyphs instead, "—" moved the percent line 4 pt.
         let stackedBaselines = stackedLayouts.map { layout in
@@ -5446,13 +5446,23 @@ enum SelfTest {
         }
         expect(Set(stackedBaselines).count == 1,
             "stacked percent and countdown baselines stay put across countdown text and the placeholder")
+        // The menu bar keeps an item's trailing edge when its width changes, so
+        // a constant distance from that edge is a constant position on screen.
+        let percentInsets = ["59m", "2h 15m", "29d 23h", "Resetting".localized, "—"].map { countdown in
+            let layout = CompactClientStatusView.Layout(percent: "57%", countdown: countdown, color: .white)
+            return ((layout.width
+                - layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22)).percent.maxX)
+                * 100).rounded()
+        }
+        expect(Set(percentInsets).count == 1,
+            "the stacked percent keeps its distance from the trailing edge as the countdown changes width")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
                "client countdown formats days and hours")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",
                "client countdown accepts fractional RFC3339 timestamps")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T12:00:10Z", now: countdownNow)?.text == "1m",
                "client countdown rounds the final partial minute up")
-        expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T11:00:00Z", now: countdownNow)?.text == "Resetting",
+        expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T11:00:00Z", now: countdownNow)?.text == "Resetting".localized,
                "elapsed resets never display negative time")
         expect(ClientTray.resetCountdown(resetsAt: "provider text", now: countdownNow) == nil
             && ClientTray.resetCountdown(resetsAt: nil, now: countdownNow) == nil,

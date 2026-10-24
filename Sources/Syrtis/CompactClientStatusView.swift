@@ -40,21 +40,12 @@ final class CompactClientStatusView: NSView {
             "—",
         ]
 
-        /// The widest text the item can show, so its width does not follow
-        /// each countdown tick and neighbouring menu-bar items stay put.
-        private static let reservedTextWidth: CGFloat = {
-            let widths = referencePercents.map { line($0, percent: true, color: .labelColor) }
-                + referenceCountdowns.map { line($0, percent: false, color: .labelColor) }
-            return ceil(widths.map {
-                CTLineGetBoundsWithOptions($0, .useGlyphPathBounds).width
-            }.max() ?? 0)
-        }()
-
-        /// The vertical counterpart: the ink every percent or countdown can
-        /// reach around its baseline. Laying out these bands instead of the
-        /// current glyphs keeps both baselines fixed, so the em dash shown
-        /// without a countdown (almost no height) or the descender in
-        /// "Resetting" does not move the percent line.
+        /// The ink every percent or countdown can reach around its baseline.
+        /// Laying out these bands instead of the current glyphs keeps both
+        /// baselines fixed, so the em dash shown without a countdown (almost
+        /// no height) or the descender in "Resetting" does not move the
+        /// percent line. Only the height is reserved; the width follows the
+        /// text (see `frames(in:)`).
         private static let reservedPercentInk = inkUnion(referencePercents, percent: true)
         private static let reservedCountdownInk = inkUnion(referenceCountdowns, percent: false)
 
@@ -69,33 +60,35 @@ final class CompactClientStatusView: NSView {
         var textHeight: CGFloat {
             Self.reservedPercentInk.height + rowGap + Self.reservedCountdownInk.height
         }
-        var width: CGFloat {
-            sidePadding * 2 + iconSize + iconGap + max(textWidth, Self.reservedTextWidth)
-        }
+        /// Tight to the current text, so the gap to the icon never grows.
+        var width: CGFloat { sidePadding * 2 + iconSize + iconGap + textWidth }
 
-        /// `text` is the reserved two-line box, centered with the icon; the
-        /// glyph rects sit on its fixed baselines.
+        /// Both lines are right-aligned to the item's trailing edge. The menu
+        /// bar lays items out from the right, so a width change moves this
+        /// item's leading edge (and the items to its left), never its trailing
+        /// edge: the text's right edge stays put on screen while the icon
+        /// follows the text. `text` is the two-line box; the glyph rects sit
+        /// on its fixed baselines.
         func frames(in bounds: CGRect)
             -> (icon: CGRect, text: CGRect, percent: CGRect, countdown: CGRect)
         {
-            // Centered on the reserved width so the icon stays put as the
-            // countdown changes; the text sits at the left of that box.
-            let reservedWidth = max(textWidth, Self.reservedTextWidth)
-            let left = bounds.midX - (iconSize + iconGap + reservedWidth) / 2
-            let textLeft = left + iconSize + iconGap
+            let textRight = bounds.maxX - sidePadding
+            let textLeft = textRight - textWidth
             let bottom = bounds.midY - textHeight / 2
             let countdownBaseline = bottom - Self.reservedCountdownInk.minY
             let percentBaseline = bottom + Self.reservedCountdownInk.height + rowGap
                 - Self.reservedPercentInk.minY
             return (
-                CGRect(x: left, y: bounds.midY - iconSize / 2, width: iconSize, height: iconSize),
-                CGRect(x: textLeft, y: bottom, width: reservedWidth, height: textHeight),
                 CGRect(
-                    x: textLeft + (textWidth - percentInk.width) / 2,
+                    x: textLeft - iconGap - iconSize, y: bounds.midY - iconSize / 2,
+                    width: iconSize, height: iconSize),
+                CGRect(x: textLeft, y: bottom, width: textWidth, height: textHeight),
+                CGRect(
+                    x: textRight - percentInk.width,
                     y: percentBaseline + percentInk.minY,
                     width: percentInk.width, height: percentInk.height),
                 CGRect(
-                    x: textLeft + (textWidth - countdownInk.width) / 2,
+                    x: textRight - countdownInk.width,
                     y: countdownBaseline + countdownInk.minY,
                     width: countdownInk.width, height: countdownInk.height))
         }

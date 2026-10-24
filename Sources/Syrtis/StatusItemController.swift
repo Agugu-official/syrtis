@@ -392,7 +392,7 @@ final class StatusItemController: NSObject {
            let icon = existingSurface?.icon ?? button.image {
             let surface = existingSurface ?? CompactClientStatusView(icon: icon)
             surface.percent = ClientTray.percentText(presentation.remainingPercent)
-            // Stay two-line without a countdown so the item keeps its width.
+            // Stay two-line without a countdown so the percent keeps its row.
             surface.countdown = presentation.countdownText ?? "—"
             surface.textColor = textColor
             button.attributedTitle = NSAttributedString(string: "")
