@@ -3,6 +3,26 @@
     <channel>
         <title>TokenBar updates</title>
         <item>
+            <title>2.10.0</title>
+            <pubDate>Sat, 24 Oct 2026 17:25:40 +0000</pubDate>
+            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.10.0</link>
+            <sparkle:version>1624</sparkle:version>
+            <sparkle:shortVersionString>2.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<b>Features:</b>
+<ul>
+<li>Individual menu bar items can show when their quota resets: pick "Percentage and reset time" or "Compact two-line" in Settings -&gt; Menu bar -&gt; Individual items. "Hide main menu bar item" hides the main item while an individual item is showing. Thanks @mijatovicmilan.</li>
+</ul>
+<b>Fixes:</b>
+<ul>
+<li>An extra Claude account added with "Add config dir…" now renews its expired login in its own Keychain item, instead of asking you to run claude again. Thanks @2011004163.</li>
+<li>Syrtis now reads OpenCode v2's credential database, so a new OpenCode Go key or a sign-out in OpenCode v2 reaches Syrtis instead of the old auth.json. Thanks @savourylie.</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.10.0/Syrtis.app.tar.gz" length="14134407" type="application/octet-stream" sparkle:edSignature="Gi8AXXCLTgVizSbcEdJx9HoDICm6FIRinidtfUwIlS4fPur8tGJy5qwkhfcezP9BwjWYB8LIVuXt3kMVkZztBA=="/>
+        </item>
+        <item>
             <title>2.9.1</title>
             <pubDate>Mon, 19 Oct 2026 13:21:17 +0000</pubDate>
             <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.9.1</link>
@@ -73,28 +93,6 @@
 </ul>
 ]]></description>
             <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.7.0/Syrtis.app.tar.gz" length="14009335" type="application/octet-stream" sparkle:edSignature="7UX2KYRlsBbEF6YZdOUzdpq7WoKiwMwEsko7mOGXtQ8DBJHBlGGwGXWqt/dpRg1QGR/lEd4Xt7uWP4OPPCSoDA=="/>
-        </item>
-        <item>
-            <title>2.6.0</title>
-            <pubDate>Fri, 09 Oct 2026 16:44:36 +0000</pubDate>
-            <link>https://github.com/Nanako0129/syrtis/releases/tag/v2.6.0</link>
-            <sparkle:version>1559</sparkle:version>
-            <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<b>Features:</b>
-<ul>
-<li>Glass tint (macOS 27): a slider tints the popover's glass, darker in dark mode and lighter in light mode, so its text stays readable over the windows behind it. It's in Settings -&gt; Dashboard -&gt; Glass tint and in Quick settings (slider icon at the top right of the popover). Thanks @Lanternko.</li>
-<li>Scrolling over the 3D chart now scrolls the page; pinch or Command + scroll zooms, and a hint on the chart says so. On macOS 27, closing the popover returns you to the app you were in. Thanks @blankhoney.</li>
-</ul>
-<b>Fixes:</b>
-<ul>
-<li>Reset on the 3D chart now returns to the starting angle.</li>
-<li>Option-drag and right-drag on the 3D chart now follow the pointer up and down.</li>
-<li>Turning off Cursor usage sync while a sync was waiting to start no longer sends a request, and Settings now says when the downloaded usage couldn't be deleted (restart Syrtis to retry).</li>
-</ul>
-]]></description>
-            <enclosure url="https://github.com/Nanako0129/syrtis/releases/download/v2.6.0/Syrtis.app.tar.gz" length="13928157" type="application/octet-stream" sparkle:edSignature="AMJ5KxLY2F8+zo2t79/CsYuD4h9hQ+o/G8tE2i8v2iyuklUN0kKqKpP54NVy5wAhJyiObyYMCbCHDTVienQ+BQ=="/>
         </item>
         <item>
             <title>1.1.1</title>
