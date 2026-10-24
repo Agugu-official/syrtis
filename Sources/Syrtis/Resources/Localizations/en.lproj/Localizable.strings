@@ -219,3 +219,12 @@
 "Pinch or ⌘ + scroll to zoom" = "Pinch or ⌘ + scroll to zoom";
 "Zoom to show the whole chart." = "Zoom to show the whole chart.";
 "Reset the camera angle and zoom." = "Reset the camera angle and zoom.";
+
+/* Individual menu-bar display options */
+"Hide main menu bar item" = "Hide main menu bar item";
+"The main item stays visible when all individual items are disabled or hidden." = "The main item stays visible when all individual items are disabled or hidden.";
+"Individual item display" = "Individual item display";
+"Percentage only" = "Percentage only";
+"Percentage and reset time" = "Percentage and reset time";
+"Compact two-line" = "Compact two-line";
+"Resetting" = "Resetting";

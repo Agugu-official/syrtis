@@ -727,7 +727,13 @@ final class TrayAnimator {
                 guard let gen = self?.nextRateGeneration(), let source = self?.source else { break }
                 let rate = try? await LiveRate.current(source: source)
                 guard let self, !Task.isCancelled else { break }
-                if let rate { self.applyRate(rate, generation: gen) }
+                if let rate {
+                    self.applyRate(rate, generation: gen)
+                } else {
+                    // Advance cached countdowns and stale presentation even
+                    // when this rate fetch fails. Reuse the existing tick.
+                    self.onQuotaUpdated?()
+                }
                 try? await Task.sleep(for: .seconds(30))
             }
         }

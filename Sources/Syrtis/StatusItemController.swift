@@ -19,6 +19,7 @@ final class StatusItemController: NSObject {
     private var animationSurface: StatusItemAnimationSurface?
     private var hasPresentedIcon = false
     private var clientStatusItems: [String: NSStatusItem] = [:]
+    private var clientVisibilityObservations: [String: NSKeyValueObservation] = [:]
     private var lastClientPresentations: [String: ClientTray.Presentation] = [:]
     private var lastClientTextColors: [String: NSColor] = [:]
     private let routeMemory: StatusItemRouteMemory
@@ -222,12 +223,25 @@ final class StatusItemController: NSObject {
     }
 
     func showPopover() {
-        guard let button = statusItem.button else { return }
         guard !isShown else { return }
         let current = persistedRoute()
-        applyRoute(routeMemory.activateMain(
-            currentClient: current.clientId, currentView: current.view))
-        presentPopover(from: button, identity: "main")
+        switch ClientTray.popoverAnchor(
+            mainVisible: statusItem.isVisible,
+            clientVisibility: clientStatusItems.mapValues(\.isVisible)
+        ) {
+        case .main:
+            guard let button = statusItem.button else { return }
+            applyRoute(routeMemory.activateMain(
+                currentClient: current.clientId, currentView: current.view))
+            presentPopover(from: button, identity: "main")
+        case .client(let clientId):
+            guard let button = clientStatusItems[clientId]?.button else { return }
+            applyRoute(routeMemory.activateClient(
+                clientId, currentClient: current.clientId, currentView: current.view))
+            presentPopover(from: button, identity: ClientTray.processIdentity(for: clientId))
+        case nil:
+            return
+        }
     }
 
     private func persistedRoute() -> StatusItemRouteMemory.Route {
@@ -304,6 +318,7 @@ final class StatusItemController: NSObject {
             textColors[presentation.clientId] = MenuBarTextColor.resolve(
                 automatic: nil, quotaRemaining: presentation.remainingPercent)
         }
+        defer { reconcileMainItemVisibility() }
         guard next != lastClientPresentations || textColors != lastClientTextColors else { return }
 
         for id in Array(clientStatusItems.keys) where next[id] == nil {
@@ -329,6 +344,22 @@ final class StatusItemController: NSObject {
         lastClientTextColors = textColors
     }
 
+    private func reconcileMainItemVisibility() {
+        // AppKit restores visibility through autosaveName. An allocated item
+        // is not necessarily a usable replacement for the main entry point.
+        let shouldShow = ClientTray.shouldShowMainItem(
+            hideMain: UserDefaults.standard.bool(forKey: ClientTray.hideMainItemKey),
+            individualItemVisibility: clientStatusItems.values.map(\.isVisible))
+        if statusItem.isVisible != shouldShow {
+            // A popover anchored to the main item cannot stay on a hidden button.
+            if !shouldShow, isShown, popoverAnchorIdentity == "main" { closePopover() }
+            statusItem.isVisible = shouldShow
+        }
+        // A hidden main item keeps its frames but runs no frame timer; quota
+        // and countdown refresh are driven elsewhere and continue.
+        animationSurface?.setPaused(!shouldShow)
+    }
+
     private func createClientItem(_ presentation: ClientTray.Presentation, textColor: NSColor?) -> Bool {
         guard let image = AgentIconView.statusItemImage(clientId: presentation.clientId) else {
             return false
@@ -337,6 +368,13 @@ final class StatusItemController: NSObject {
         item.autosaveName = presentation.autosaveName
         if #available(macOS 27.0, *), glassPanel != nil { item.expandedInterfaceDelegate = self }
         clientStatusItems[presentation.clientId] = item
+        clientVisibilityObservations[presentation.clientId] = item.observe(
+            \.isVisible, options: [.new]
+        ) { [weak self] _, _ in
+            // Status-item visibility is AppKit UI state and changes on the
+            // main thread, independently of quota/defaults reconciliation.
+            MainActor.assumeIsolated { self?.reconcileMainItemVisibility() }
+        }
         updateClientItem(item, presentation: presentation, textColor: textColor, image: image)
         return true
     }
@@ -348,10 +386,35 @@ final class StatusItemController: NSObject {
         image: NSImage? = nil
     ) {
         guard let button = item.button else { return }
+        let existingSurface = button.subviews.compactMap { $0 as? CompactClientStatusView }.first
         if let image { button.image = image }
-        button.imagePosition = .imageLeft
-        button.imageScaling = .scaleNone
-        Self.setTitle(" \(presentation.valueText)", color: textColor, on: button)
+        if presentation.displayStyle == .stackedReset,
+           let icon = existingSurface?.icon ?? button.image {
+            let surface = existingSurface ?? CompactClientStatusView(icon: icon)
+            surface.percent = ClientTray.percentText(presentation.remainingPercent)
+            // Stay two-line without a countdown so the percent keeps its row.
+            surface.countdown = presentation.countdownText ?? "—"
+            surface.textColor = textColor
+            button.attributedTitle = NSAttributedString(string: "")
+            button.title = ""
+            button.image = nil
+            button.imagePosition = .noImage
+            item.length = surface.contentLayout.width
+            if surface.superview == nil { button.addSubview(surface) }
+            surface.frame = button.bounds
+            surface.needsDisplay = true
+        } else {
+            if let surface = existingSurface {
+                button.image = surface.icon
+                surface.removeFromSuperview()
+            }
+            item.length = NSStatusItem.variableLength
+            button.imagePosition = .imageLeft
+            button.imageScaling = .scaleNone
+            button.cell?.wraps = false
+            button.cell?.usesSingleLineMode = true
+            Self.setTitle(" \(presentation.valueText)", color: textColor, on: button)
+        }
         button.toolTip = presentation.toolTip
         button.setAccessibilityLabel(presentation.accessibilityLabel)
         button.setAccessibilityIdentifier(presentation.processIdentity)
@@ -362,6 +425,7 @@ final class StatusItemController: NSObject {
     }
 
     private func removeClientItem(_ clientId: String) {
+        clientVisibilityObservations.removeValue(forKey: clientId)?.invalidate()
         guard let item = clientStatusItems.removeValue(forKey: clientId) else { return }
         if popoverAnchorIdentity == ClientTray.processIdentity(for: clientId) {
             closePopover()

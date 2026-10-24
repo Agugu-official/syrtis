@@ -72,6 +72,8 @@ struct SettingsPanel: View {
     @AppStorage(IconColoring.storageKey) private var iconColoringRaw = IconColoring.warningOnly.rawValue
     @AppStorage(TrayAnimator.windowLetterKey) private var showsWindowLetter = true
     @AppStorage(TrayAnimator.quotaSourceKey) private var quotaSource = QuotaResolver.auto
+    @AppStorage(ClientTray.hideMainItemKey) private var hideMainItem = false
+    @AppStorage(ClientTray.displayStyleKey) private var individualDisplayStyle = ClientTray.DisplayStyle.percentage.rawValue
     @AppStorage(ClientTray.enabledKey) private var individualEnabledRaw = ""
     @AppStorage(ClientTray.selectionsKey) private var individualSelectionsRaw = "{}"
     @AppStorage("tokenbar.updates.beta") private var betaUpdates = false
@@ -349,6 +351,19 @@ struct SettingsPanel: View {
             officialClients: AgentIconView.availableOfficialClientIDs())
 
         section("Individual items") {
+            toggleRow("Hide main menu bar item", isOn: $hideMainItem)
+            hint("The main item stays visible when all individual items are disabled or hidden.")
+            row("Individual item display") {
+                Picker("Individual item display", selection: $individualDisplayStyle) {
+                    ForEach(ClientTray.DisplayStyle.allCases, id: \.rawValue) { style in
+                        Text(style.label.localized).tag(style.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: 210)
+                .accessibilityLabel("Individual item display".localized)
+            }
             hint("Add a separate menu bar item for a client, showing one of its quota windows. Auto shows the one with the least left.")
             if rows.isEmpty, isLoading {
                 LoadingLine(title: "Looking for eligible clients…")

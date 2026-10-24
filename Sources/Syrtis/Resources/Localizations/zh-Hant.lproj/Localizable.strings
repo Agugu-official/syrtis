@@ -671,3 +671,12 @@
 "Pinch or ⌘ + scroll to zoom" = "捏合或按住 ⌘ 捲動可縮放";
 "Zoom to show the whole chart." = "縮放到能看到整張圖。";
 "Reset the camera angle and zoom." = "重設視角與縮放。";
+
+/* Individual menu-bar display options */
+"Hide main menu bar item" = "隱藏主要選單列項目";
+"The main item stays visible when all individual items are disabled or hidden." = "所有獨立項目停用或隱藏時，主要項目仍會顯示。";
+"Individual item display" = "獨立項目顯示方式";
+"Percentage only" = "僅顯示百分比";
+"Percentage and reset time" = "百分比與重設倒數";
+"Compact two-line" = "精簡雙行";
+"Resetting" = "重設中";

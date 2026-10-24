@@ -1534,6 +1534,11 @@ enum SelfTest {
                     >= (oneX.map { $0.alphaBounds.height } ?? .infinity) * 1.8,
             "tray 2x raster preserves logical alpha coverage"
         )
+        expect(
+            trayFrame.map(StatusItemAnimationSurface.pauseTimerStatesForTesting)
+                == [true, false, false, false, true],
+            "a hidden main item stops its frame timer and resumes with the latest frames"
+        )
 #endif
 
         // ModelColors: provider inference + shade math.
@@ -5257,8 +5262,22 @@ enum SelfTest {
         expect(
             ClientTray.settingsRows(
                 presentClients: ["claude"], payload: quotaPayload, enabled: ["codex"], selections: [:],
-                hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId) == ["claude"],
-            "disabled clients disappear when no longer present while capable rows remain")
+                hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId) == ["claude", "codex"],
+            "explicitly enabled clients stay configurable without graph history")
+        let loadingRows = ClientTray.settingsRows(
+            presentClients: [], payload: quotaPayload, enabled: ["claude", "codex"], selections: [:],
+            hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId)
+        let loadedRows = ClientTray.settingsRows(
+            presentClients: ["codex", "claude"], payload: quotaPayload, enabled: ["claude", "codex"],
+            selections: [:], hidden: [], orderRaw: "", officialClients: officialClientIDs).map(\.clientId)
+        expect(loadingRows == ["claude", "codex"] && loadedRows == loadingRows,
+            "enabled Settings rows keep their order when graph history finishes loading")
+        expect(
+            ClientTray.settingsRows(
+                presentClients: [], payload: quotaPayload, enabled: ["claude", "codex"], selections: [:],
+                hidden: [], orderRaw: "codex,claude", officialClients: officialClientIDs
+            ).map(\.clientId) == ["codex", "claude"],
+            "a saved tab order still orders Settings rows")
         expect(
             ClientTray.settingsRows(
                 presentClients: [], payload: nil, enabled: [], selections: [:], hidden: [],
@@ -5286,14 +5305,14 @@ enum SelfTest {
 
         // Rows must not depend on Set iteration order. With no saved tab order
         // and no payload, every row comes from the preserved-enabled path, which
-        // must follow the ordered `present` array.
+        // is sorted by ID so it matches the rows shown before the graph loads.
         expect(
             ClientTray.settingsRows(
                 presentClients: ["codex", "claude", "grok"], payload: nil,
                 enabled: ["grok", "claude", "codex"], selections: [:], hidden: [],
                 orderRaw: "", officialClients: officialClientIDs
-            ).map(\.clientId) == ["codex", "claude", "grok"],
-            "preserved enabled rows follow graph order, not enabled-set hash order")
+            ).map(\.clientId) == ["claude", "codex", "grok"],
+            "preserved enabled rows are sorted by ID, not enabled-set hash order")
 
         // A vanished explicit card is reported as a missing selection on the item
         // itself, not as a generic provider outage — the user has to change the
@@ -5346,6 +5365,159 @@ enum SelfTest {
             !sensitiveVisibleText.contains("SECRET_")
                 && !sensitiveRuntimeText.contains("SECRET_"),
             "client Settings and status surfaces redact provider and card input")
+
+        // Menu-bar countdowns use the selected window's structured
+        // timestamp and remain independent of local transcript discovery.
+        let countdownNow = ISO8601DateFormatter().date(from: "2026-10-19T12:00:00Z")!
+        let displaySuite = "syrtis-selftest-client-display-\(UUID().uuidString)"
+        if let defaults = UserDefaults(suiteName: displaySuite) {
+            defer { defaults.removePersistentDomain(forName: displaySuite) }
+            expect(ClientTray.DisplayStyle.current(defaults: defaults) == .percentage
+                && !defaults.bool(forKey: ClientTray.hideMainItemKey),
+                "existing installs retain percentage-only items and the main item")
+            for style in ClientTray.DisplayStyle.allCases {
+                defaults.set(style.rawValue, forKey: ClientTray.displayStyleKey)
+                expect(UserDefaults(suiteName: displaySuite).map {
+                    ClientTray.DisplayStyle.current(defaults: $0)
+                } == style, "individual display style persists across defaults instances")
+            }
+            defaults.set("unknown-future-style", forKey: ClientTray.displayStyleKey)
+            expect(ClientTray.DisplayStyle.current(defaults: defaults) == .percentage,
+                "unknown individual display styles fall back to percentage only")
+        } else {
+            expect(false, "isolated individual display preference suite is available")
+        }
+        let visibilityCases: [([Bool], Bool)] = [
+            ([], true), ([false], true), ([false, false], true),
+            ([true], false), ([false, true], false), ([true, true], false),
+        ]
+        for (visibility, expectedMainVisibility) in visibilityCases {
+            expect(ClientTray.shouldShowMainItem(hideMain: false, individualItemVisibility: visibility),
+                "the main item remains visible when hiding is disabled")
+            expect(ClientTray.shouldShowMainItem(hideMain: true, individualItemVisibility: visibility)
+                == expectedMainVisibility,
+                "allocated but hidden individual items cannot suppress the main entry point")
+        }
+        expect(ClientTray.popoverAnchor(mainVisible: true, clientVisibility: ["codex": true]) == .main
+            && ClientTray.popoverAnchor(
+                mainVisible: false, clientVisibility: ["codex": true, "claude": false]) == .client("codex")
+            && ClientTray.popoverAnchor(
+                mainVisible: false, clientVisibility: ["codex": true, "claude": true]) == .client("claude")
+            && ClientTray.popoverAnchor(mainVisible: false, clientVisibility: ["codex": false]) == nil,
+            "a programmatic open anchors to a visible client item as that client, never as main")
+        for (percent, countdown) in [("48%", "4d 23h"), ("100%", "59m"), ("9%", "Resetting".localized)] {
+            let compact = CompactClientStatusView.Layout(
+                percent: percent, countdown: countdown, color: .white)
+            let single = NSAttributedString(
+                string: "\(percent) · \(countdown)",
+                attributes: [.font: NSFont.menuBarFont(ofSize: 0)])
+            expect(compact.textHeight <= 20
+                && compact.textWidth < single.size().width * 0.65,
+                "stacked client text fits the menu-bar height and reduces width for \(countdown)")
+            for height in [CGFloat(22), CGFloat(33)] {
+                let bounds = CGRect(x: 0, y: 0, width: compact.width, height: height)
+                let frames = compact.frames(in: bounds)
+                let textBounds = frames.percent.union(frames.countdown)
+                expect(abs(frames.text.midY - frames.icon.midY) < 0.01
+                    && abs(frames.text.midY - bounds.midY) < 0.01
+                    // The descender of "g" sits exactly on the band's edge.
+                    && frames.text.insetBy(dx: -0.01, dy: -0.01).contains(textBounds)
+                    && textBounds.minX - frames.icon.maxX >= 6
+                    && bounds.contains(frames.text),
+                    "stacked client text box and icon are centered with a gap at height \(height)")
+            }
+        }
+        let stackedLayouts = [
+            ("9%", "59m"), ("57%", "2h 15m"), ("100%", "23h 59m"), ("48%", "29d 23h"),
+            ("9%", "Resetting"), ("—%", "—"),
+        ].map { CompactClientStatusView.Layout(percent: $0.0, countdown: $0.1, color: .white) }
+        expect(stackedLayouts.allSatisfy { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return abs(frames.icon.minX - layout.sidePadding) < 0.01
+                && abs(frames.text.minX - frames.icon.maxX - layout.iconGap) < 0.01
+        },
+            "the stacked item is tight to its text, so the icon gap stays 6 pt even beside \"—\"")
+        // Baseline = glyph rect bottom minus that line's own ink offset. Laid
+        // out from the current glyphs instead, "—" moved the percent line 4 pt.
+        let stackedBaselines = stackedLayouts.map { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return [frames.percent.minY - layout.percentInk.minY,
+                    frames.countdown.minY - layout.countdownInk.minY].map { ($0 * 100).rounded() }
+        }
+        expect(Set(stackedBaselines).count == 1,
+            "stacked percent and countdown baselines stay put across countdown text and the placeholder")
+        // The menu bar keeps an item's trailing edge when its width changes, so
+        // a constant distance from that edge is a constant position on screen.
+        let percentInsets = ["59m", "2h 15m", "29d 23h", "Resetting".localized, "—"].map { countdown in
+            let layout = CompactClientStatusView.Layout(percent: "57%", countdown: countdown, color: .white)
+            return ((layout.width
+                - layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22)).percent.maxX)
+                * 100).rounded()
+        }
+        expect(Set(percentInsets).count == 1,
+            "the stacked percent keeps its distance from the trailing edge as the countdown changes width")
+        expect(stackedLayouts.allSatisfy { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return abs(layout.width - frames.countdown.maxX - layout.sidePadding) < 0.01
+                && abs(layout.width - frames.percent.maxX - layout.sidePadding) < 0.01
+        },
+            "both stacked lines end at the trailing padding")
+        expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
+               "client countdown formats days and hours")
+        expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",
+               "client countdown accepts fractional RFC3339 timestamps")
+        expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T12:00:10Z", now: countdownNow)?.text == "1m",
+               "client countdown rounds the final partial minute up")
+        expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T11:00:00Z", now: countdownNow)?.text == "Resetting".localized,
+               "elapsed resets never display negative time")
+        expect(ClientTray.resetCountdown(resetsAt: "provider text", now: countdownNow) == nil
+            && ClientTray.resetCountdown(resetsAt: nil, now: countdownNow) == nil,
+               "invalid or absent reset timestamps do not fabricate a countdown")
+        let countdownPayload = try! JSONDecoder().decode(AgentUsagePayload.self, from: Data("""
+        {"generatedAt":"now","agents":[{"clientId":"codex","source":"test","updatedAt":"now","windows":[
+          {"cardId":"session.v1","label":"Session","usedPercent":43,"remainingPercent":57,"resetsAt":"2026-10-19T14:15:00Z"},
+          {"cardId":"weekly.v1","label":"Weekly","usedPercent":10,"remainingPercent":90,"resetsAt":"2026-10-25T04:00:00Z"}
+        ]}]}
+        """.utf8))
+        let countdownItems = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex", "claude"],
+            selections: ["codex": "weekly.v1"], hidden: [], officialClients: officialClientIDs,
+            displayStyle: .inlineReset, now: countdownNow)
+        expect(countdownItems.first(where: { $0.clientId == "codex" })?.valueText == "90% · 5d 16h",
+               "countdown follows the explicitly selected window without graph history")
+        expect(countdownItems.first(where: { $0.clientId == "claude" })?.valueText == "—%",
+               "enabled clients remain visible while their quota is unavailable")
+        let autoCountdown = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex"], selections: [:], hidden: [],
+            officialClients: officialClientIDs, displayStyle: .inlineReset, now: countdownNow).first
+        expect(autoCountdown?.valueText == "57% · 2h 15m",
+               "Auto percent and countdown come from the same tightest window")
+        expect(autoCountdown?.toolTip.contains("Resets in 2h 15m") == true
+            && autoCountdown?.accessibilityLabel.contains("Resets in 2h 15m") == true,
+            "the selected reset countdown is available in the tooltip and accessibility label")
+        let percentageOnly = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex"], selections: [:], hidden: [],
+            officialClients: officialClientIDs, now: countdownNow).first
+        expect(percentageOnly?.valueText == "57%" && percentageOnly?.countdown == nil,
+            "percentage-only mode preserves the previous title and omits countdowns")
+        let stackedCountdown = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex"], selections: [:], hidden: [],
+            officialClients: officialClientIDs, displayStyle: .stackedReset, now: countdownNow).first
+        expect(stackedCountdown?.countdown == autoCountdown?.countdown
+            && stackedCountdown != autoCountdown,
+            "switching to stacked layout participates in reconciliation even with unchanged quota")
+        let missingCountdown = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex"],
+            selections: ["codex": "missing.v1"], hidden: [],
+            officialClients: officialClientIDs, displayStyle: .stackedReset, now: countdownNow).first
+        expect(missingCountdown?.countdown == nil,
+            "a missing quota window cannot display another window's countdown")
+        let laterCountdown = ClientTray.runtimePresentations(
+            graph: nil, payload: countdownPayload, enabled: ["codex"], selections: [:], hidden: [],
+            officialClients: officialClientIDs, displayStyle: .inlineReset,
+            now: countdownNow.addingTimeInterval(60)).first
+        expect(laterCountdown?.valueText == "57% · 2h 14m" && laterCountdown != autoCountdown,
+               "cached countdown changes participate in item reconciliation")
 
         func transportPayload(_ body: String) -> AgentUsagePayload? {
             do {

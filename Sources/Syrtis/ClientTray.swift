@@ -84,6 +84,9 @@ final class StatusItemRouteMemory {
 
 /// Pure contracts shared by individual status items and the Settings surface.
 enum ClientTray {
+    static let hideMainItemKey = "tokenbar.tray.hideMainItem"
+    static let displayStyleKey = "tokenbar.tray.clients.displayStyle"
+
     static let enabledKey = "tokenbar.tray.clients.enabled"
     static let selectionsKey = "tokenbar.tray.clients.quotaSelections"
     static let activeTabKey = "tokenbar.activeTab"
@@ -96,6 +99,48 @@ enum ClientTray {
     static let maxEntries = 128
     static let maxClientIDBytes = 128
     static let maxCardIDBytes = 4096
+
+    enum DisplayStyle: String, CaseIterable, Equatable, Sendable {
+        case percentage
+        case inlineReset
+        case stackedReset
+
+        var label: String {
+            switch self {
+            case .percentage: return "Percentage only"
+            case .inlineReset: return "Percentage and reset time"
+            case .stackedReset: return "Compact two-line"
+            }
+        }
+
+        var showsReset: Bool { self != .percentage }
+
+        static func current(defaults: UserDefaults = .standard) -> Self {
+            Self(rawValue: defaults.string(forKey: ClientTray.displayStyleKey) ?? "") ?? .percentage
+        }
+    }
+
+    struct ResetCountdown: Equatable, Sendable {
+        let text: String
+        let accessibilityLabel: String
+    }
+
+    static func shouldShowMainItem(hideMain: Bool, individualItemVisibility: [Bool]) -> Bool {
+        !hideMain || !individualItemVisibility.contains(true)
+    }
+
+    enum PopoverAnchor: Equatable, Sendable {
+        case main
+        case client(String)
+    }
+
+    /// A programmatic open anchors to the main item, or to the first visible
+    /// client item when the main item is hidden. A client anchor owns that
+    /// client's identity and route, so its own click closes the popover.
+    static func popoverAnchor(mainVisible: Bool, clientVisibility: [String: Bool]) -> PopoverAnchor? {
+        if mainVisible { return .main }
+        return clientVisibility.filter(\.value).keys.min().map(PopoverAnchor.client)
+    }
 
     enum Status: String, Equatable, Sendable {
         case available
@@ -154,13 +199,20 @@ enum ClientTray {
         let displayName: String
         let remainingPercent: Double?
         let status: Status
+        var displayStyle: DisplayStyle = .percentage
+        var countdown: ResetCountdown? = nil
+
+        var countdownText: String? { countdown?.text }
 
         var processIdentity: String { ClientTray.processIdentity(for: clientId) }
         var autosaveName: String { ClientTray.autosaveName(for: clientId) }
 
-        var valueText: String { ClientTray.percentText(remainingPercent) }
+        var valueText: String {
+            let percent = ClientTray.percentText(remainingPercent)
+            return countdownText.map { "\(percent) · \($0)" } ?? percent
+        }
 
-        var toolTip: String {
+        private var quotaToolTip: String {
             if status == .missingSelection {
                 return "%@ — selected quota window unavailable".localized(displayName)
             }
@@ -174,7 +226,7 @@ enum ClientTray {
             return "%@ — quota unavailable".localized(displayName)
         }
 
-        var accessibilityLabel: String {
+        private var quotaAccessibilityLabel: String {
             if status == .missingSelection {
                 return "%@, selected quota window unavailable".localized(displayName)
             }
@@ -186,13 +238,22 @@ enum ClientTray {
             }
             return ClientTray.quotaAccessibilityLabel(displayName, remainingPercent)
         }
+
+        var toolTip: String {
+            countdown.map { "\(quotaToolTip) — \($0.accessibilityLabel)" } ?? quotaToolTip
+        }
+
+        var accessibilityLabel: String {
+            countdown.map { "\(quotaAccessibilityLabel). \($0.accessibilityLabel)" }
+                ?? quotaAccessibilityLabel
+        }
     }
 
     static func enabled(defaults: UserDefaults = .standard) -> Set<String> {
         parseEnabledRaw(defaults.object(forKey: enabledKey) as? String)
     }
 
-    /// Settings owns both preferences through `@AppStorage`, so mutation is a
+    /// Settings owns the enabled and selection preferences through `@AppStorage`, so mutation is a
     /// pure raw-to-raw transform; nil means the stored raw is out of bounds and
     /// must not be repaired by write-back.
     static func enabledRaw(
@@ -291,7 +352,8 @@ enum ClientTray {
         orderRaw: String,
         officialClients: Set<String>
     ) -> [SettingsRow] {
-        let present = canonicalIDs(presentClients)
+        var present = canonicalIDs(presentClients)
+        for id in enabled.sorted() where !present.contains(id) { present.append(id) }
         // Agent presence in the quota payload is the stable capability signal.
         // A supported provider can temporarily return only an error and zero
         // windows (for example while its local OAuth client is unavailable);
@@ -301,16 +363,15 @@ enum ClientTray {
         let newlyConfigurable = present.filter {
             quotaCapable.contains(quotaClientID(for: $0)) && officialClients.contains($0)
         }
-        // Derived from the ordered `present` array, not by iterating the enabled
-        // Set: `orderedClients` returns its input untouched when no tab order is
-        // saved, so hash order would leak into the UI and then visibly reshuffle
-        // once the payload lands and `newlyConfigurable` supplies graph order.
         let preserved = present.filter {
             enabled.contains($0) && officialClients.contains($0)
         }
         var ids = newlyConfigurable
         for id in preserved where !ids.contains(id) { ids.append(id) }
-        ids = ClientRegistry.orderedClients(ids, orderRaw: orderRaw)
+        // Sorted by ID before the saved tab order: the graph's order is
+        // unknown while it loads, so following it would reorder enabled rows
+        // once it lands.
+        ids = ClientRegistry.orderedClients(ids.sorted(), orderRaw: orderRaw)
 
         return ids.map { clientId in
             let selection = selections[clientId] ?? autoSelection
@@ -381,9 +442,12 @@ enum ClientTray {
         enabled: Set<String>,
         selections: [String: String],
         hidden: Set<String>,
-        officialClients: Set<String>
+        officialClients: Set<String>,
+        displayStyle: DisplayStyle = .percentage,
+        now: Date = Date()
     ) -> [Presentation] {
-        let present = canonicalIDs(graph?.summary.clients ?? [])
+        var present = canonicalIDs(graph?.summary.clients ?? [])
+        for id in enabled.sorted() where !present.contains(id) { present.append(id) }
         return present
             .filter { enabled.contains($0) && officialClients.contains($0) && !hidden.contains($0) }
             .sorted()
@@ -413,8 +477,25 @@ enum ClientTray {
                     clientId: clientId,
                     displayName: ClientRegistry.style(clientId).displayName,
                     remainingPercent: resolved?.remainingPercent,
-                    status: status)
+                    status: status,
+                    displayStyle: displayStyle,
+                    countdown: displayStyle.showsReset && status == .available
+                        ? resetCountdown(resetsAt: resolved?.resetsAt, now: now) : nil)
             }
+    }
+
+    /// Only a structured timestamp from the selected healthy window may
+    /// drive the countdown. Never display an unvalidated provider string.
+    static func resetCountdown(resetsAt: String?, now: Date) -> ResetCountdown? {
+        guard let resetsAt else { return nil }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let reset = fractional.date(from: resetsAt) ?? ISO8601DateFormatter().date(from: resetsAt)
+        else { return nil }
+        guard let span = UsagePace.spanText(until: reset, now: now) else {
+            return ResetCountdown(text: "Resetting".localized, accessibilityLabel: "Resets now".localized)
+        }
+        return ResetCountdown(text: span, accessibilityLabel: "Resets in %@".localized(span))
     }
 
     /// One rounding site: every displayed percent, tooltip, and accessibility

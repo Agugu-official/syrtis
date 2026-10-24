@@ -36,6 +36,7 @@ final class StatusItemAnimationSurface {
     private weak var backingWindow: NSWindow?
     private var layoutGeneration = 0
     private var isAnimated = false
+    private var isPaused = false
     private var tornDown = false
 
     var onAppearanceChange: (() -> Void)?
@@ -68,6 +69,25 @@ final class StatusItemAnimationSurface {
             CGSize(width: frame.width, height: frame.height),
             alphaBounds
         )
+    }
+
+    /// Frame-timer state after: frames set, paused, a speed change while
+    /// paused, new frames while paused, and resume.
+    nonisolated static func pauseTimerStatesForTesting(_ frame: NSImage) -> [Bool] {
+        let layer = StatusItemRunnerLayer()
+        defer { layer.stop() }
+        layer.setFrames([frame, frame], speed: 1)
+        var states = [layer.isTicking]
+        layer.setPaused(true)
+        states.append(layer.isTicking)
+        layer.setSpeed(4)
+        states.append(layer.isTicking)
+        layer.stop()
+        layer.setFrames([frame, frame], speed: 2)
+        states.append(layer.isTicking)
+        layer.setPaused(false)
+        states.append(layer.isTicking)
+        return states
     }
 #endif
 
@@ -119,6 +139,17 @@ final class StatusItemAnimationSurface {
     func setSpeed(_ speed: Float) {
         guard !tornDown, isAnimated else { return }
         runnerLayer.setSpeed(speed)
+    }
+
+    /// Stops the frame timer while the item is hidden, keeping frames and
+    /// speed so showing the item resumes the same animation.
+    func setPaused(_ paused: Bool) {
+        guard !tornDown, paused != isPaused else { return }
+        isPaused = paused
+        runnerLayer.setPaused(paused)
+        // Frames swapped in while hidden wait for a layout pass, which a
+        // hidden button may not have had.
+        if !paused { scheduleLayout() }
     }
 
     func showStatic(_ image: NSImage, isTemplate: Bool) {
@@ -266,7 +297,11 @@ private final class StatusItemRunnerLayer: CALayer {
     private var rasterScale: CGFloat = 1
     private var frameTimer: DispatchSourceTimer?
     private var frameInterval = 0.5
+    private var frameSpeed: Float = 1
+    private var isPaused = false
     private var tintColor = NSColor.textColor.cgColor
+
+    var isTicking: Bool { frameTimer != nil }
 
     override init() {
         super.init()
@@ -399,7 +434,8 @@ private final class StatusItemRunnerLayer: CALayer {
     }
 
     func setSpeed(_ speed: Float) {
-        guard !frames.isEmpty else { return }
+        frameSpeed = speed
+        guard !frames.isEmpty, !isPaused else { return }
         let interval = 0.5 / Double(max(speed, 1))
         guard frameTimer == nil || abs(interval - frameInterval) > 0.000_001 else { return }
         frameInterval = interval
@@ -419,6 +455,17 @@ private final class StatusItemRunnerLayer: CALayer {
         }
         frameTimer = timer
         timer.resume()
+    }
+
+    func setPaused(_ paused: Bool) {
+        guard paused != isPaused else { return }
+        isPaused = paused
+        if paused {
+            frameTimer?.cancel()
+            frameTimer = nil
+        } else {
+            setSpeed(frameSpeed)
+        }
     }
 
     func setColor(_ color: CGColor) {
