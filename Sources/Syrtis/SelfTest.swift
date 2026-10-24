@@ -5456,6 +5456,12 @@ enum SelfTest {
         }
         expect(Set(percentInsets).count == 1,
             "the stacked percent keeps its distance from the trailing edge as the countdown changes width")
+        expect(stackedLayouts.allSatisfy { layout in
+            let frames = layout.frames(in: CGRect(x: 0, y: 0, width: layout.width, height: 22))
+            return abs(layout.width - frames.countdown.maxX - layout.sidePadding) < 0.01
+                && abs(layout.width - frames.percent.maxX - layout.sidePadding) < 0.01
+        },
+            "both stacked lines end at the trailing padding")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-25T04:00:00Z", now: countdownNow)?.text == "5d 16h",
                "client countdown formats days and hours")
         expect(ClientTray.resetCountdown(resetsAt: "2026-10-19T14:15:00.000Z", now: countdownNow)?.text == "2h 15m",
