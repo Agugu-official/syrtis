@@ -1,0 +1,6 @@
+Features:
+- Individual menu bar items can show when their quota resets: pick "Percentage and reset time" or "Compact two-line" in Settings -> Menu bar -> Individual items. "Hide main menu bar item" hides the main item while an individual item is showing. Thanks @mijatovicmilan.
+
+Fixes:
+- An extra Claude account added with "Add config dir…" now renews its expired login in its own Keychain item, instead of asking you to run claude again. Thanks @2011004163.
+- Syrtis now reads OpenCode v2's credential database, so a new OpenCode Go key or a sign-out in OpenCode v2 reaches Syrtis instead of the old auth.json. Thanks @savourylie.
