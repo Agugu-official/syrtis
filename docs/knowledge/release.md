@@ -4,7 +4,7 @@ id: kb-release
 kind: canonical
 scope: repository
 read_when: changing release scripts, code signing, appcast, Sparkle, Homebrew, Pages, packaged Info.plist, or post-release notes
-last_verified: 2026-09-27
+last_verified: 2026-10-25
 sources: [".github/workflows/release.yml", "scripts/check_ci_gate.sh", ".github/workflows/ci.yml", ".github/workflows/ci-release.yml", ".github/workflows/pages.yml", ".github/workflows/update-install-count.yml", "scripts/bundle.sh", "scripts/build-sparkle.sh", "scripts/make_appcast.sh", "scripts/render_notes_html.sh", "appcast.xml", "Makefile", "docs/knowledge/plans/provider-quota-pace.md", "Sources/Syrtis/SelfTest.swift", "public release history"]
 ---
 
@@ -62,8 +62,8 @@ Either form triggers the workflow identically — `push: tags: ["v*"]`, with the
 |---|---|---|
 | Native app bundle | `.github/workflows/release.yml` (`build` → `sign`) with `scripts/bundle.sh`, `codesign_app.sh`, `notarize_app.sh` | `scripts/verify_signed_app.sh` passes on the app extracted from the final archive: Developer ID of the expected team, hardened runtime, no entitlements, stapled, Gatekeeper `Notarized Developer ID` |
 | Sparkle archive/signature | Release workflow and Sparkle tools | EdDSA signature verifies against the published archive |
-| GitHub Release body | Hand-written `release-notes/<tag>.md`, assembled by `release_notes.sh` with GitHub's contributor tail | Body has accurate changes, links, and contribution credit |
-| Sparkle / appcast text | Hand-written `release-notes/<tag>.txt`, assembled by `release_notes.sh` with the `Thanks:` credit line | Same change set as the body, no markdown, figures agree with it |
+| GitHub Release body | Hand-written `release-notes/<tag>.md`, copied by `release_notes.sh` in `build`; `release_credit.sh` appends a plain-mention `Contributors:` line and GitHub's changelog tail in `publish` | Body has accurate changes, links, contribution credit, and a `Full Changelog` compare link from the previous tag |
+| Sparkle / appcast text | Hand-written `release-notes/<tag>.txt`, copied by `release_notes.sh`; credit is written into it by hand | Same change set as the body, no markdown, figures agree with it |
 | `appcast.xml` | `scripts/make_appcast.sh` and generated feed | XML parses, old items remain, channel semantics are correct |
 | Homebrew cask | Release workflow generator plus tap repository | Version, URL, checksum, and style match the published asset |
 | Install count | `update-install-count.yml` | Orphan badge branch contains the current filtered asset count |
@@ -88,7 +88,7 @@ Release builds are signed with the maintainer's Developer ID Application certifi
 |---|---|---|
 | `build` | nothing (read-only token, no Environment) | Rust + Swift build, ad-hoc bundle, release notes, `unsigned.tar` artifact |
 | `sign` | `release` Environment: Developer ID .p12 + password, notary API key, Sparkle key; the tap key for an emptiness check only | Temporary keychain, re-sign inside-out, notarize (verdict from JSON, not exit code), staple, verify the extracted archive; installer DMG built, signed, notarized, stapled and verified mounted; appcast |
-| `publish` | `release` Environment: tap deploy key; `contents`/`actions` write | GitHub Release, appcast commit on main, badge dispatch, tap cask |
+| `publish` | `release` Environment: tap deploy key; `contents`/`actions` write | Contributor credit and changelog range (`generate-notes` needs `contents: write`), GitHub Release, appcast commit on main, badge dispatch, tap cask |
 
 - **Secrets live in the `release` Environment** (deployment policy: `v*` tags and `main`; required reviewer: the maintainer), never at repository level. Environment variables: `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `APPLE_TEAM_ID`. A `v*` tag ruleset restricts creating, moving and deleting release tags to the maintainer.
 - **Dry run:** `workflow_dispatch` on `main` builds, signs, notarizes and verifies as a tag would, checks that every key the tag path reads is present, and publishes nothing; the signed archive is a one-day artifact.
@@ -159,7 +159,7 @@ Keep English and `zh-tw` copy aligned, preserve original Syrtis design, and trea
 
 The release notes path has two forms and two published surfaces: the GitHub Release body and the Sparkle appcast description. The legacy Tauri manifest is frozen at v1.20.2 and does not carry the current notes.
 
-The two bodies are hand-written and bound to the tag by filename (`release-notes/<tag>.{md,txt}`), so they are deterministic and a missing one fails the release's `build` job rather than inheriting the previous version's text. What is still assembled at run time is the contributor credit line and GitHub's changelog tail: both come from the API under `GH_TOKEN` and are silently absent without it. So local preview text is still not proof of the CI artifact — the bodies will match, the credit and tail may not.
+The two bodies are hand-written and bound to the tag by filename (`release-notes/<tag>.{md,txt}`), so they are deterministic and a missing one fails the release's `build` job rather than inheriting the previous version's text. What is still assembled at run time is the release body's `Contributors:` line and GitHub's changelog tail: `release_credit.sh` gets both from `releases/generate-notes` in `publish`, and any failure there stops the release before it is created. From v2.2.0 to v2.10.0 that call ran in `build` under a read-only token with its errors discarded, so eleven releases shipped with no compare range and no Contributors avatars; the avatars count only plain `@login` mentions, not the hand-written credit links to a GitHub profile. Those eleven bodies were backfilled with `release_credit.sh` on 2026-10-25, appended only. The appcast text carries no generated credit.
 
 A durable escaping regression occurred when a note first contained literal `<`: awk replacement semantics turned `&lt;` into `<lt;`. The renderer lives in [`scripts/render_notes_html.sh`](../../scripts/render_notes_html.sh), which `make_appcast.sh` calls with the sidecar path; `make_appcast.sh` keeps the empty-notes guard, because an empty sidecar becomes an empty `<description>`. `render_notes_html.sh --self-test` renders a fixture containing literal `<`, `&`, `>`, an already-escaped `&lt;` and `]]>`, compares the result byte for byte, and runs in CI's release-notes contract step, so a broken `esc()` in the shipping file fails there. `>` is escaped even though HTML does not need it, because the output is embedded in CDATA, where a raw `]]>` ends the section; whether `generate_appcast` splits it when embedding is unverified, and escaping removes the question.
 
