@@ -70,8 +70,6 @@ jobs:
       # the tag by filename, so a release cannot inherit the previous version's
       # text. Build-independent, so it runs before the toolchain.
       - name: Release notes contract
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 

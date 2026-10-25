@@ -128,18 +128,16 @@ jobs:
         run: scripts/bundle.sh "$VERSION" "$BUILD"
 
       # release-notes.txt: plain text for the Sparkle dialog and appcast.
-      # release-notes.md: markdown for the GitHub release page, with PR
-      # links, contributor credit, and GitHub's New Contributors tail.
+      # release-notes.md: markdown for the GitHub release page; `publish`
+      # appends the contributor credit and GitHub's changelog tail.
       #
       # Both bodies are hand-written at release-notes/<tag>.{txt,md} and this
-      # step only assembles them with the GitHub-derived credit line and tail.
-      # A missing file fails here rather than falling back, which is the point:
-      # the previous scheme read an unversioned override that a completed
-      # release left behind, armed to republish itself on the next tag.
+      # step only copies them. A missing file fails here rather than falling
+      # back, which is the point: the previous scheme read an unversioned
+      # override that a completed release left behind, armed to republish
+      # itself on the next tag.
       - name: Assemble release notes
         if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: scripts/release_notes.sh
 
       # A tar keeps the framework's symlinks and modes; upload-artifact does
@@ -391,6 +389,15 @@ jobs:
           set -euo pipefail
           echo "c39de81d85baa99351532952b88ef21074dc7633fc54aab90a2b81873426c0bf  scripts/legacy/tauri-latest.json" | shasum -a 256 -c -
           cp scripts/legacy/tauri-latest.json "$RUNNER_TEMP/signed/latest.json"
+
+      # Here, not in `build`: generate-notes needs `contents: write`, and
+      # `build` runs every dependency's build script. A failure stops the
+      # release before it exists (v2.2.0–v2.10.0 shipped without range or
+      # credit while a read-only token failed this call silently).
+      - name: Append contributor credit and changelog range
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release_credit.sh "$RUNNER_TEMP/signed/release-notes.md"
 
       - name: Create GitHub release
         env:
