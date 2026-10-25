@@ -39,10 +39,11 @@ grep -q '^\*\*Full Changelog' <<< "$TAIL" || {
 
 # PR authors ("by @login" in GitHub's notes) plus everyone the hand-written
 # body thanks as `[@login](url)`, e.g. the reporter of a fixed issue; the
-# owner and bots excluded.
-CONTRIB="$( { printf '%s\n' "$AUTO" | grep -oE 'by @[A-Za-z0-9_-]+' | sed 's/^by //'
+# owner and bots (GitHub writes them as `@name[bot]`) excluded.
+CONTRIB="$( { printf '%s\n' "$AUTO" | grep -oE 'by @[A-Za-z0-9_-]+(\[bot\])?' \
+    | grep -v '\[bot\]$' | sed 's/^by //'
   grep -oE '\[@[A-Za-z0-9_-]+\]' "$MD" | tr -d '[]'; } \
-  | sort -fu | grep -vix "@${OWNER}" | grep -vi 'bot$' || true)"
+  | sort -fu | grep -vix "@${OWNER}" || true)"
 
 {
   if [[ -n "$CONTRIB" ]]; then
