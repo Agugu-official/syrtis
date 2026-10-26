@@ -53,14 +53,28 @@ struct GlassBackground: View {
 /// wallpaper blur that makes Liquid Glass cards come alive).
 struct PopoverBackdrop: View {
     @Environment(\.inGlassPanel) private var inGlassPanel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         if inGlassPanel {
-            Color.clear // the panel's own .regular glass is the backdrop
+            Color.clear // the panel's own surface is the backdrop
+        } else if reduceTransparency {
+            ReducedTransparencySurface.window
         } else {
             VisualEffectBackground(material: .hudWindow)
         }
     }
+}
+
+/// Opaque stand-ins for the glass surfaces while Accessibility > Display >
+/// Reduce Transparency is on. The card scrims and the HUD backdrop are tuned
+/// for a translucent backdrop; with transparency reduced, #504 reported the
+/// Settings cards turning a flat dark grey that was hard to read. The system's
+/// window and control colours give the System Settings look instead and follow
+/// the appearance on their own.
+enum ReducedTransparencySurface {
+    static let window = Color(nsColor: .windowBackgroundColor)
+    static let card = Color(nsColor: .controlBackgroundColor)
 }
 
 /// AppKit visual-effect bridge.

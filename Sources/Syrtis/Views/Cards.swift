@@ -125,9 +125,15 @@ struct GlassCardBackground: ViewModifier {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.inGlassPanel) private var inGlassPanel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
+        if reduceTransparency {
+            content
+                .background(
+                    ReducedTransparencySurface.card,
+                    in: RoundedRectangle(cornerRadius: cornerRadius))
+        } else if #available(macOS 26.0, *) {
             // .clear glass lets the wallpaper breathe through the cards
             // themselves (.regular reads as a dense dark slab when cards
             // fill the whole scroll area). The tint follows the appearance:
