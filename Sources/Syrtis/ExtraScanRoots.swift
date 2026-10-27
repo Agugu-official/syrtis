@@ -44,30 +44,27 @@ enum ExtraScanRoots {
             ClaudeExtraRoots.isMissing(path)
         }
 
-        /// Home and the filesystem root are scan-everything roots; anything
-        /// that exists and is not a directory can never be a session root and
-        /// would otherwise be handed to `WalkDir`, which yields a regular file
-        /// as its own entry. A missing path is not rejected here — it is
-        /// reported as missing and kept for a later scan.
+        /// Path-only, so it never blocks the main actor on a stalled mount.
+        /// Unlike a Claude root, which `expand` narrows to two sub-folders, a
+        /// Pi root is walked recursively as-is, so home, the filesystem root
+        /// and every ancestor of home are refused. A non-directory is refused
+        /// by the Rust setter (`classify`) and reported in `rejected`; a
+        /// missing path is kept and reported as missing for a later scan.
         static func isRejectedRoot(_ path: String) -> Bool {
             let standardized = standardizedPath(path)
             if ClaudeExtraRoots.isRejectedRoot(standardized) { return true }
-            var isDirectory: ObjCBool = false
-            let exists = FileManager.default.fileExists(
-                atPath: standardized, isDirectory: &isDirectory)
-            return exists && !isDirectory.boolValue
+            let home = FileManager.default.homeDirectoryForCurrentUser.path
+            return home.hasPrefix(standardized + "/")
         }
 
-        /// Probe paths off the main actor through the same serial queue the
-        /// setter uses, so a probe issued after a save observes the filesystem
-        /// that save was applied against rather than racing it.
+        /// Probe paths off the main actor on the setter's serial queue. A probe
+        /// issued right after a save can run before that save's install, which
+        /// `apply` enqueues from a later main-actor task.
         static func missingRoots(
             in paths: [String],
             then completion: @escaping @Sendable @MainActor (Set<String>) -> Void
         ) {
-            ClaudeExtraRoots.missingRoots(in: paths) { missing in
-                completion(missing)
-            }
+            ClaudeExtraRoots.missingRoots(in: paths, then: completion)
         }
     }
 

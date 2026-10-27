@@ -17068,7 +17068,7 @@ enum SelfTest {
         expect(
             ExtraScanRoots.payloadJSON(
                 claudeConfigDirs: ["/Users/x/.claude-work"], piRoots: [])
-                == ClaudeExtraRoots.payloadJSON(["/Users/x/.claude-work"]),
+                == #"{"claude":["\/Users\/x\/.claude-work\/projects","\/Users\/x\/.claude-work\/transcripts"]}"#,
             "PI-ROOTS with no Pi roots the payload is byte-identical to the "
                 + "Claude-only payload, so an upgrade does not force an unnecessary "
                 + "cache drop (mutation: adding an empty \"pi\" key)")
@@ -17115,25 +17115,24 @@ enum SelfTest {
             "PI-ROOTS repeated Pi roots are standardized and deduplicated before "
                 + "the wire, so one folder cannot enter the scan twice")
 
-        // Path shape: home/root/existing non-directories are refused, while a
-        // missing path is kept (and warned about) because it can become a
-        // directory later. The file case is the dangerous one: `WalkDir` would
-        // yield a regular file as its own entry and ingest its contents.
+        // Path shape: home, root and every ancestor of home are refused, because
+        // a Pi root is walked recursively as-is; a missing path is kept (and
+        // warned about) because it can become a directory later. Files are
+        // refused by the Rust setter, not here, so this check stays path-only.
         let piTempDir = FileManager.default.temporaryDirectory.path
         let piMissing = "\(piTempDir)/tokenbar-pi-selftest-missing-\(UUID().uuidString)"
-        let piFile = "\(piTempDir)/tokenbar-pi-selftest-file-\(UUID().uuidString)"
-        try? Data("not a directory".utf8).write(to: URL(fileURLWithPath: piFile))
-        defer { try? FileManager.default.removeItem(atPath: piFile) }
         let piHome = FileManager.default.homeDirectoryForCurrentUser.path
         expect(
             ExtraScanRoots.Pi.isRejectedRoot(piHome)
                 && ExtraScanRoots.Pi.isRejectedRoot("/")
-                && ExtraScanRoots.Pi.isRejectedRoot(piFile)
+                && ExtraScanRoots.Pi.isRejectedRoot((piHome as NSString).deletingLastPathComponent)
+                && !ExtraScanRoots.Pi.isRejectedRoot("\(piHome)/pi-exports")
                 && !ExtraScanRoots.Pi.isRejectedRoot(piTempDir)
                 && !ExtraScanRoots.Pi.isRejectedRoot(piMissing),
-            "PI-ROOTS home, root, and an existing non-directory are refused; an "
-                + "ordinary folder and a not-yet-created root are accepted (mutation: "
-                + "letting a file through, which the scanner would ingest)")
+            "PI-ROOTS home, root, and an ancestor of home are refused; a folder "
+                + "under home, an ordinary folder and a not-yet-created root are "
+                + "accepted (mutation: dropping the ancestor check, which would walk "
+                + "every home on the machine)")
         expect(
             !ExtraScanRoots.Pi.isMissing(piTempDir)
                 && ExtraScanRoots.Pi.isMissing(piMissing),
