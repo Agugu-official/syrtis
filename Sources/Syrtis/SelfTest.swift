@@ -4741,6 +4741,7 @@ enum SelfTest {
             ("senpi", "Senpi", "#2f6f63"),
             ("omp", "Oh My Pi", "#d946ef"),
             ("dsh", "DeepSeek Harness", "#001259"),
+            ("antigravity-extension", "Antigravity Extension", "#0369a1"),
         ] {
             let style = ClientRegistry.style(id)
             expect(style.displayName == name && style.color == color, "\(id) registry metadata")
@@ -4772,6 +4773,13 @@ enum SelfTest {
         // NOT leak into the deny-filter canonicalizer above.
         expect(AgentLimitsCard.normalizeTraceClient("codex-cli") == "codex", "limits wrapper applies explicit alias")
         expect(AgentLimitsCard.normalizeTraceClient("antigravity-cli") == "antigravity", "limits wrapper folds generic -cli for quota attribution")
+        expect(
+            AgentLimitsCard.normalizeTraceClient("antigravity-extension") == "antigravity"
+                && ClientRegistry.canonicalClient("antigravity-extension") == "antigravity-extension",
+            "AGX4: limits card folds the extension onto antigravity quota while the deny-filter "
+                + "canonicalizer keeps it distinct (mutation: no -extension fold in "
+                + "normalizeTraceClient leaves extension traces without a quota card; "
+                + "a canonicalClient alias would hide the IDE with it)")
 
         // Quota resolver: card IDs are explicit and missing paceStatus remains
         // a valid legacy fixture. Selection tests intentionally read only
@@ -4817,6 +4825,7 @@ enum SelfTest {
             "every official registry id has a loadable brand asset")
         expect(
             officialClientIDs.contains("antigravity-cli")
+                && officialClientIDs.contains("antigravity-extension")
                 && officialClientIDs.contains("kilo")
                 && !officialClientIDs.contains("junie"),
             "icon aliases are official while fallback-only clients are not")
@@ -4969,6 +4978,9 @@ enum SelfTest {
             "percent presentation: clamps finite values and fails closed")
         expect(
             ClientTray.quotaClientID(for: "antigravity-cli") == "antigravity"
+                && ClientTray.quotaClientID(for: "antigravity-extension") == "antigravity"
+                && ClientTray.processIdentity(for: "antigravity-extension")
+                    != ClientTray.processIdentity(for: "antigravity")
                 && ClientTray.processIdentity(for: "antigravity")
                     != ClientTray.processIdentity(for: "antigravity-cli")
                 && ClientTray.autosaveName(for: "kilo")
@@ -6765,8 +6777,32 @@ enum SelfTest {
         // Grok Build & Bot: the CLI carries the local session usage, the IDE
         // client carries the OAuth quota and no usage of its own.
         expect(
-            ClientRegistry.tabSlice("antigravity") == ["antigravity", "antigravity-cli"],
-            "antigravity tab expands to IDE + CLI")
+            ClientRegistry.tabSlice("antigravity")
+                == ["antigravity", "antigravity-cli", "antigravity-extension"],
+            "antigravity tab expands to IDE + CLI + extension")
+        // antigravity-extension (engine client 42, ~/.gemini/antigravity/conversations
+        // DB) belongs to the same family. Each assertion names its mutation.
+        expect(
+            ClientRegistry.tabSlice("antigravity").contains("antigravity-extension")
+                && ClientRegistry.tabClients(
+                    present: ["antigravity-extension"], quotaIds: ["antigravity"]) == ["antigravity"],
+            "AGX1: extension usage lands in the antigravity tab "
+                + "(mutation: dropping it from tabGroups gives it a tab of its own)")
+        expect(
+            ClientRegistry.quotaOwner("antigravity-extension") == "antigravity"
+                && ClientRegistry.quotaClients(
+                    present: ["antigravity-extension"], quotaIds: [], tabHidden: [], orderRaw: "")
+                    == ["antigravity", "antigravity-cli", "antigravity-extension"],
+            "AGX2: extension usage is served by the antigravity subscription "
+                + "(mutation: removing it from antigravityQuotaMembers makes it own a quota card)")
+        expect(
+            ClientRegistry.style("antigravity-extension").displayName == "Antigravity Extension"
+                && ClientRegistry.shortName("antigravity-extension") == "Antigravity Extension"
+                && Set(["antigravity", "antigravity-cli", "antigravity-extension"].map {
+                    ClientRegistry.style($0).color
+                }).count == 3,
+            "AGX3: extension has its own name and a colour distinct from IDE and CLI "
+                + "(mutation: copying a sibling's colour or name merges them in legends)")
         // Pins the string a reader sees, and nothing more: "Antigravity" is
         // also what `tabLabel` returns by FALLBACK for an id absent from
         // `tabGroups`, so unlike the Grok case this assertion cannot witness
@@ -6782,7 +6818,7 @@ enum SelfTest {
             "CLI usage plus IDE quota still yields exactly one tab")
         expect(
             ClientRegistry.withGroupMembers(Set(["antigravity"]))
-                == Set(["antigravity", "antigravity-cli"]),
+                == Set(["antigravity", "antigravity-cli", "antigravity-extension"]),
             "hiding the Antigravity tab pulls the CLI row along")
         // Upgrade path. `antigravity-cli` had its own tab before the grouping,
         // so an existing user can have exactly that id in tokenbar.tabs.hidden.
@@ -6838,6 +6874,14 @@ enum SelfTest {
             ClientRegistry.quotaExcludedClients(
                 tabHidden: [], limitsHidden: ["antigravity-cli"]) == ["antigravity-cli"],
             "hiding the CLI's quota card does not fold into the IDE's")
+        expect(
+            ClientRegistry.quotaExcludedClients(
+                tabHidden: [], limitsHidden: ["antigravity-extension"]) == ["antigravity-extension"]
+                && ClientRegistry.hiddenTabClients(["antigravity-extension"])
+                    == Set(["antigravity", "antigravity-cli", "antigravity-extension"]),
+            "AGX5: control, the extension stays a distinct id in hidden-set filtering "
+                + "(mutation: folding limits-hidden onto the IDE hides its card too; "
+                + "dropping the tab fold lets a hidden Antigravity tab leak extension usage)")
         // Control: the pre-existing Grok grouping is unaffected by turning the
         // two ternaries into a table.
         expect(ClientRegistry.tabSlice("grok") == ["grok", "grok-bot"], "grok grouping unchanged")
@@ -6847,10 +6891,12 @@ enum SelfTest {
         // above: only tab visibility applies to the whole group, and hiding
         // one member's own limits card must not touch the other's.
         let antigravityVisibilityCases: [(String, Set<String>, Set<String>, [String])] = [
-            ("both visible", [], [], ["antigravity", "antigravity-cli"]),
-            ("IDE quota hidden", [], ["antigravity"], ["antigravity-cli"]),
-            ("CLI quota hidden", [], ["antigravity-cli"], ["antigravity"]),
-            ("both quotas hidden", [], ["antigravity", "antigravity-cli"], []),
+            ("all visible", [], [], ["antigravity", "antigravity-cli", "antigravity-extension"]),
+            ("IDE quota hidden", [], ["antigravity"], ["antigravity-cli", "antigravity-extension"]),
+            ("CLI quota hidden", [], ["antigravity-cli"], ["antigravity", "antigravity-extension"]),
+            ("extension quota hidden", [], ["antigravity-extension"], ["antigravity", "antigravity-cli"]),
+            ("IDE and CLI quotas hidden", [], ["antigravity", "antigravity-cli"], ["antigravity-extension"]),
+            ("all quotas hidden", [], ["antigravity", "antigravity-cli", "antigravity-extension"], []),
             ("Antigravity tab hidden", ["antigravity"], [], []),
         ]
         for (label, tabHidden, limitsHidden, expected) in antigravityVisibilityCases {
@@ -11981,9 +12027,9 @@ enum SelfTest {
         // into the IDE's` asserts against the real function.
         expect(
             ClientRegistry.hiddenTabClients(["antigravity"])
-                == Set(["antigravity", "antigravity-cli"])
+                == Set(["antigravity", "antigravity-cli", "antigravity-extension"])
                 && ClientRegistry.hiddenTabClients(["antigravity-cli"])
-                    == Set(["antigravity", "antigravity-cli"]),
+                    == Set(["antigravity", "antigravity-cli", "antigravity-extension"]),
             "A1b: either stored form of a grouped tab excludes every client under that tab, "
                 + "so a hidden tab cannot leak one of its members' usage to the profile")
 
@@ -11993,7 +12039,9 @@ enum SelfTest {
         // identical quota row. The rule is per subscription, not per client.
         let demoAgentIds = Set(DemoData.agentUsage.agents.map(\.clientId))
         expect(
-            !demoAgentIds.contains("antigravity-cli") && demoAgentIds.contains("antigravity"),
+            !demoAgentIds.contains("antigravity-cli")
+                && !demoAgentIds.contains("antigravity-extension")
+                && demoAgentIds.contains("antigravity"),
             "demo gives the Antigravity subscription one card, under the id that owns it")
         // Control: a grouped member that owns its OWN allowance keeps its card.
         // Without this, excluding every grouped member would pass the assertion

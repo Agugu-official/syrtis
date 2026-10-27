@@ -520,7 +520,7 @@ enum ClientTray {
     /// tab and status-item identity, but its quota is published by the shared
     /// Antigravity provider snapshot.
     static func quotaClientID(for clientId: String) -> String {
-        clientId == "antigravity-cli" ? "antigravity" : clientId
+        ClientRegistry.quotaOwner(clientId)
     }
 
     static func processIdentity(for clientId: String) -> String {

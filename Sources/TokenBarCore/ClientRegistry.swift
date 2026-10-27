@@ -83,6 +83,10 @@ public enum ClientRegistry {
         // Vendor-local engine client (no upstream color). DeepSeek's #4d6bfe
         // sits 6.3 ΔE76 from antigravity-cli; navy keeps every client >= 22.
         "dsh": ("DeepSeek Harness", "#001259"),
+        // Vendor-local engine client (tokscale-core UPSTREAM.md, no upstream
+        // color). Antigravity family, so blue; sky-700 measures 23.7 ΔE76 from
+        // the nearest registered color, above the 22 floor.
+        "antigravity-extension": ("Antigravity Extension", "#0369a1"),
     ]
 
     /// Every registered client id, sorted. Demo fixtures use this canonical
@@ -143,15 +147,22 @@ public enum ClientRegistry {
     }
 
     /// The client whose quota snapshot a client's usage is served by, where the
-    /// two identities differ. `antigravity-cli` is a registered client in its own
-    /// right — process identity, tab, icon and preferences all stay distinct —
-    /// but it draws on the `antigravity` subscription and the quota views have
-    /// always folded it that way. Anything reasoning about which subscription a
+    /// two identities differ. `antigravity-cli` and `antigravity-extension` are
+    /// registered clients in their own right — process identity, tab, icon and
+    /// preferences all stay distinct — but they draw on the `antigravity`
+    /// subscription and the quota views fold them that way. Anything reasoning about which subscription a
     /// client's tokens consume has to fold it too, or it will conclude the CLI
     /// owns no subscription at all.
     public static func quotaOwner(_ id: String) -> String {
-        id == "antigravity-cli" ? "antigravity" : id
+        antigravityQuotaMembers.contains(id) ? "antigravity" : id
     }
+
+    /// Antigravity-family clients that spend the `antigravity` subscription:
+    /// the CLI and the extension (IDE conversations DB), both separate engine
+    /// clients with their own display, neither with a quota snapshot.
+    private static let antigravityQuotaMembers: Set<String> = [
+        "antigravity-cli", "antigravity-extension",
+    ]
 
     /// The registered client behind an opencode subscription label. opencode
     /// reports which providers it is authed against as display labels rather
@@ -227,7 +238,7 @@ public enum ClientRegistry {
         // "IDE" is a word neither member's display name uses. Grok keeps the
         // two-part form because "Grok Build" and "Grok Bot" are both product
         // names a user would look for; nobody looks for "Antigravity IDE".
-        "antigravity": (["antigravity", "antigravity-cli"], "Antigravity"),
+        "antigravity": (["antigravity", "antigravity-cli", "antigravity-extension"], "Antigravity"),
     ]
 
     /// Reverse lookup built once: a group member's id -> the tab id it folds
