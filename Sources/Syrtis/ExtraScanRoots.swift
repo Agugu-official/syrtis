@@ -94,6 +94,32 @@ enum ExtraScanRoots {
         return "{\"claude\":\(encode(claudePaths)),\"pi\":\(encode(piPaths))}"
     }
 
+    /// One client's share of a merged apply result, for the per-section hints
+    /// in Settings.
+    ///
+    /// Both sections apply ONE merged payload, so the raw result mixes both
+    /// clients' notes and `registeredCount` spans the whole registry — the Pi
+    /// section showing it would blame an unreadable Claude root on the Pi
+    /// list. Notes are filtered by client, and the per-client registered
+    /// count is derived as requested minus rejected: a rejected path never
+    /// enters the registry, while an unreadable one DOES and is retried.
+    struct ClientHint {
+        let unreadable: Int
+        let rejected: Int
+        let registered: Int
+    }
+
+    static func clientHint(
+        _ result: ExtraScanPathsResult?, client: String, requested: Int
+    ) -> ClientHint? {
+        guard let result else { return nil }
+        let rejected = result.rejected.filter { $0.client == client }.count
+        return ClientHint(
+            unreadable: result.unreadable.filter { $0.client == client }.count,
+            rejected: rejected,
+            registered: max(requested - rejected, 0))
+    }
+
     /// Apply the merged registry at launch and after every edit. The install
     /// machinery (quota registry, applied marker, generation, cache
     /// invalidation, and quota wake) stays in `ClaudeExtraRoots`, which is

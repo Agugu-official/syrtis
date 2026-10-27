@@ -1102,13 +1102,18 @@ struct SettingsPanel: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
-            if let result = claudeExtraRootsResult, !result.unreadable.isEmpty {
+            // Per-client share of the merged result — the raw counts span both
+            // clients' roots. See `ExtraScanRoots.clientHint`.
+            let claudeHint = ExtraScanRoots.clientHint(
+                claudeExtraRootsResult, client: "claude",
+                requested: ClaudeExtraRoots.expandedPaths(claudeExtraRoots).count)
+            if let claudeHint, claudeHint.unreadable > 0 {
                 hint("%lld of %lld folders can't be read right now; Syrtis will retry on the next scan.".localized(
-                    result.unreadable.count, result.registeredCount))
+                    claudeHint.unreadable, claudeHint.registered))
             }
-            if let result = claudeExtraRootsResult, !result.rejected.isEmpty {
+            if let claudeHint, claudeHint.rejected > 0 {
                 hint("%lld path(s) can't be scanned and weren't added.".localized(
-                    result.rejected.count))
+                    claudeHint.rejected))
             }
             hint("For another Claude account, run Claude Code with CLAUDE_CONFIG_DIR set to its own folder and add that folder here. Its usage joins your totals; accounts aren't shown separately.")
         }
@@ -1150,13 +1155,17 @@ struct SettingsPanel: View {
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
-            if let result = piExtraRootsResult, !result.unreadable.isEmpty {
+            // Per-client share of the merged result — the raw counts span both
+            // clients' roots. See `ExtraScanRoots.clientHint`.
+            let piHint = ExtraScanRoots.clientHint(
+                piExtraRootsResult, client: "pi", requested: piExtraRoots.count)
+            if let piHint, piHint.unreadable > 0 {
                 hint("%lld of %lld folders can't be read right now; Syrtis will retry on the next scan.".localized(
-                    result.unreadable.count, result.registeredCount))
+                    piHint.unreadable, piHint.registered))
             }
-            if let result = piExtraRootsResult, !result.rejected.isEmpty {
+            if let piHint, piHint.rejected > 0 {
                 hint("%lld path(s) can't be scanned and weren't added.".localized(
-                    result.rejected.count))
+                    piHint.rejected))
             }
             hint("Directories of Pi session-format JSONL files. Usage-only exports from headless runners are counted, and full Pi sessions also work.")
             hint("Only assistant usage contributes. Roots merge into the Pi total; there is no per-root breakdown.")

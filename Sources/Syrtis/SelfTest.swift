@@ -17172,6 +17172,33 @@ enum SelfTest {
                 + "snapshot is stamped with every root the scan included")
         ClaudeExtraRoots.resetAppliedForTesting()
 
+        // Per-client hint projection: both Settings sections apply ONE merged
+        // payload, so the raw result mixes both clients' notes and its
+        // registeredCount spans the whole registry. Each section must show
+        // only its own share, with the per-client registered count derived
+        // as requested minus rejected.
+        let mergedHintJSON = """
+        {"registeredCount":4,
+         "unreadable":[{"client":"claude","path":"/Users/x/.claude-work/projects","reason":"not found"},
+                       {"client":"pi","path":"\(piMissing)","reason":"not found"}],
+         "rejected":[{"client":"pi","path":"\(piRootB)","reason":"not a directory"}]}
+        """
+        let mergedHintResult = try! JSONDecoder().decode(
+            ExtraScanPathsResult.self, from: Data(mergedHintJSON.utf8))
+        let piHint = ExtraScanRoots.clientHint(
+            mergedHintResult, client: "pi", requested: 3)
+        let claudeHint = ExtraScanRoots.clientHint(
+            mergedHintResult, client: "claude", requested: 2)
+        expect(
+            piHint?.unreadable == 1 && piHint?.rejected == 1
+                && piHint?.registered == 2
+                && claudeHint?.unreadable == 1 && claudeHint?.rejected == 0
+                && claudeHint?.registered == 2,
+            "PI-ROOTS the per-client hint projection keeps the other client's "
+                + "notes out of each section and derives registered as requested "
+                + "minus rejected (mutation: showing the raw merged counts, which "
+                + "would blame an unreadable Claude root on the Pi section)")
+
         // Generation/invalidation: installing a merged registry that moved
         // advances the generation (views key their scan-derived reloads on it)
         // and records both clients; installing the identical registry again,
