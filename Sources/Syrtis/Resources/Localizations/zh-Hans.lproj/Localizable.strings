@@ -315,6 +315,8 @@
 "Every %lld min" = "每 %lld 分钟";
 
 "Add config dir…" = "添加配置目录…";
+"Add folder…" = "添加目录…";
+"Additional Pi roots" = "额外的 Pi 根目录";
 "Add" = "添加";
 "Folder not found. Kept in case the drive is disconnected or the path needs fixing." = "找不到这个目录。先保留，以防磁盘没有连接或路径需要修正。";
 
@@ -337,6 +339,8 @@
 "How often Syrtis rereads all logs in full. In between, new activity still shows up within 5 minutes." = "Syrtis 多久完整重读一次所有日志。两次之间，新的用量仍会在 5 分钟内出现。";
 "Syrtis started as a fork of tokcat by handlecusion. Log parsing and pricing come from tokscale by Junho Yeo, the menu bar design draws on CodexBar by Peter Steinberger, and the running cat comes from RunCat by Takuto Nakamura. MIT licensed." = "Syrtis 最初是从 handlecusion 的 tokcat 分支出来的。日志解析和计价来自 Junho Yeo 的 tokscale；菜单栏设计参考 Peter Steinberger 的 CodexBar；奔跑的猫来自 Takuto Nakamura 的 RunCat。采用 MIT 授权。";
 "For another Claude account, run Claude Code with CLAUDE_CONFIG_DIR set to its own folder and add that folder here. Its usage joins your totals; accounts aren't shown separately." = "另一个 Claude 账户：用 CLAUDE_CONFIG_DIR 指定它自己的目录来运行 Claude Code，再把该目录添加到这里。它的用量会计入总计，不会按账户分别显示。";
+"Directories of Pi session-format JSONL files. Usage-only exports from headless runners are counted, and full Pi sessions also work." = "Pi 会话格式 JSONL 文件的目录。无界面运行器写出的纯用量导出也会计入，完整的 Pi 会话同样适用。";
+"Only assistant usage contributes. Roots merge into the Pi total; there is no per-root breakdown." = "只有助手用量会计入。各根目录的用量会合并进 Pi 总计，不会分别显示。";
 "%lld of %lld folders can't be read right now; Syrtis will retry on the next scan." = "%2$lld 个目录中有 %1$lld 个暂时无法读取，下次扫描会再试。";
 "%lld path(s) can't be scanned and weren't added." = "有 %lld 条路径无法扫描，没有添加。";
 

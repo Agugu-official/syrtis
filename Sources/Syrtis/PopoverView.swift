@@ -78,7 +78,7 @@ struct PopoverView: View {
     /// see the series task below.
     ///
     /// The GENERATION, not the persisted list. The list changes the instant
-    /// Settings saves, which is before `ClaudeExtraRoots.apply` has handed the
+    /// Settings saves, which is before `ExtraScanRoots.apply` has handed the
     /// new set to the core, so a task keyed on it restarts early and publishes
     /// a load that scanned the old roots. The generation is bumped after the
     /// setter returns.

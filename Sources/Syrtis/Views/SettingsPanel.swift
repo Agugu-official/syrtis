@@ -111,13 +111,19 @@ struct SettingsPanel: View {
     @State private var attributionNotice: String?
     @State private var attributionRevision = 0
     /// Loaded once per panel appearance; mutations write through
-    /// `ClaudeExtraRoots.save`/`.apply` immediately (D1: no restart).
+    /// `ClaudeExtraRoots.save` and the shared `ExtraScanRoots.apply`
+    /// immediately (D1: no restart).
     @State private var claudeExtraRoots: [String] = ClaudeExtraRoots.load()
     @State private var claudeExtraRootsResult: ExtraScanPathsResult?
     /// Filled off the main actor — see `ClaudeExtraRoots.missingRoots`. Empty
     /// until the first probe lands, so a row shows no warning rather than a
     /// wrong one while the answer is still unknown.
     @State private var missingClaudeRoots: Set<String> = []
+    /// Additional Pi roots, same lifecycle as the Claude list above. The two
+    /// are applied together because `tb_set_extra_scan_paths` is full-replace.
+    @State private var piExtraRoots: [String] = ExtraScanRoots.Pi.load()
+    @State private var piExtraRootsResult: ExtraScanPathsResult?
+    @State private var missingPiRoots: Set<String> = []
     /// The stored list itself, observed rather than copied: automatic capture
     /// changes it while this panel is open, and a copy held here would be
     /// written back over that change.
@@ -1037,6 +1043,8 @@ struct SettingsPanel: View {
 
         claudeExtraRootsSection()
 
+        piExtraRootsSection()
+
         antigravityAccountsSection()
 
         cursorSyncSection()
@@ -1105,6 +1113,55 @@ struct SettingsPanel: View {
             hint("For another Claude account, run Claude Code with CLAUDE_CONFIG_DIR set to its own folder and add that folder here. Its usage joins your totals; accounts aren't shown separately.")
         }
         .onAppear { refreshMissingClaudeRoots() }
+    }
+
+    /// Extra directories of Pi session-format JSONL files. A headless runner
+    /// can write a usage-only export here instead of a normal session file
+    /// under `~/.pi/agent/sessions`; the existing Pi parser reads it without
+    /// distinction. No default root and no discovery: the list starts empty.
+    @ViewBuilder
+    private func piExtraRootsSection() -> some View {
+        section("Additional Pi roots") {
+            ForEach(piExtraRoots, id: \.self) { path in
+                row(path) {
+                    HStack(spacing: 6) {
+                        if missingPiRoots.contains(path) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                                .help("Folder not found. Kept in case the drive is disconnected or the path needs fixing.".localized)
+                        }
+                        Button {
+                            piExtraRoots.removeAll { $0 == path }
+                            commitPiExtraRoots()
+                        } label: {
+                            Image(systemName: "minus.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            Button {
+                addPiExtraRoot()
+            } label: {
+                Label("Add folder…".localized, systemImage: "plus.circle")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            if let result = piExtraRootsResult, !result.unreadable.isEmpty {
+                hint("%lld of %lld folders can't be read right now; Syrtis will retry on the next scan.".localized(
+                    result.unreadable.count, result.registeredCount))
+            }
+            if let result = piExtraRootsResult, !result.rejected.isEmpty {
+                hint("%lld path(s) can't be scanned and weren't added.".localized(
+                    result.rejected.count))
+            }
+            hint("Directories of Pi session-format JSONL files. Usage-only exports from headless runners are counted, and full Pi sessions also work.")
+            hint("Only assistant usage contributes. Roots merge into the Pi total; there is no per-root breakdown.")
+        }
+        .onAppear { refreshMissingPiRoots() }
     }
 
     /// Cursor usage synced from the Cursor desktop app. The hint is the same
@@ -1245,12 +1302,37 @@ struct SettingsPanel: View {
 
     private func commitClaudeExtraRoots() {
         ClaudeExtraRoots.save(claudeExtraRoots)
-        ClaudeExtraRoots.apply { claudeExtraRootsResult = $0 }
+        ExtraScanRoots.apply { claudeExtraRootsResult = $0 }
         refreshMissingClaudeRoots()
     }
 
     private func refreshMissingClaudeRoots() {
         ClaudeExtraRoots.missingRoots(in: claudeExtraRoots) { missingClaudeRoots = $0 }
+    }
+
+    private func addPiExtraRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add".localized
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let path = (url.path as NSString).standardizingPath
+        guard !ExtraScanRoots.Pi.isRejectedRoot(path),
+            !piExtraRoots.contains(path)
+        else { return }
+        piExtraRoots.append(path)
+        commitPiExtraRoots()
+    }
+
+    private func commitPiExtraRoots() {
+        ExtraScanRoots.Pi.save(piExtraRoots)
+        ExtraScanRoots.apply { piExtraRootsResult = $0 }
+        refreshMissingPiRoots()
+    }
+
+    private func refreshMissingPiRoots() {
+        ExtraScanRoots.Pi.missingRoots(in: piExtraRoots) { missingPiRoots = $0 }
     }
 
     @ViewBuilder

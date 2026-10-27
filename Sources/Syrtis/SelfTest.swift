@@ -17051,6 +17051,198 @@ enum SelfTest {
                 + "matching how vendor's own scan silently skips nonexistent roots "
                 + "instead of dropping the user's configuration)")
 
+        // MARK: - Additional Pi scan roots (PI-ROOTS)
+        //
+        // `tb_set_extra_scan_paths` is full-replace, so the only safe payload
+        // is one that carries every client's roots. `ExtraScanRoots` is the
+        // single builder; these assertions pin the merge, the byte-compatible
+        // upgrade path, the path rejection, and the generation/cache gate that
+        // the existing install machinery owns.
+        let piRootA = "/Users/x/pi-usage-a"
+        let piRootB = "/Users/x/pi-usage-b"
+
+        // The upgrade case: with no Pi roots configured the payload must be
+        // exactly the Claude-only string the previous build stored in
+        // `appliedKey`. A new empty `pi` key would look like a root change and
+        // cost every user a cache-bypassing rescan on first launch.
+        expect(
+            ExtraScanRoots.payloadJSON(
+                claudeConfigDirs: ["/Users/x/.claude-work"], piRoots: [])
+                == ClaudeExtraRoots.payloadJSON(["/Users/x/.claude-work"]),
+            "PI-ROOTS with no Pi roots the payload is byte-identical to the "
+                + "Claude-only payload, so an upgrade does not force an unnecessary "
+                + "cache drop (mutation: adding an empty \"pi\" key)")
+
+        let piOnly = ExtraScanRoots.payloadJSON(
+            claudeConfigDirs: ["/Users/x/.claude-work"], piRoots: [piRootA])
+        let piOnlyDecoded = try! JSONDecoder().decode(
+            [String: [String]].self, from: Data(piOnly.utf8))
+        expect(
+            piOnlyDecoded["claude"] == ClaudeExtraRoots.expand("/Users/x/.claude-work")
+                && piOnlyDecoded["pi"] == [piRootA],
+            "PI-ROOTS a Pi change carries Claude's expanded roots too, because a "
+                + "Pi-only payload would clear them (mutation: sending {\"pi\":[...]} alone)")
+
+        let claudeOnlyWithPi = ExtraScanRoots.payloadJSON(
+            claudeConfigDirs: ["/Users/x/.claude-other"], piRoots: [piRootA])
+        let claudeOnlyWithPiDecoded = try! JSONDecoder().decode(
+            [String: [String]].self, from: Data(claudeOnlyWithPi.utf8))
+        expect(
+            claudeOnlyWithPiDecoded["claude"]
+                == ClaudeExtraRoots.expand("/Users/x/.claude-other")
+                && claudeOnlyWithPiDecoded["pi"] == [piRootA],
+            "PI-ROOTS a Claude change still carries the configured Pi roots, so it "
+                + "does not clear them (mutation: building the payload from Claude's "
+                + "list alone)")
+
+        let piEmpty = ExtraScanRoots.payloadJSON(claudeConfigDirs: [], piRoots: [])
+        let piEmptyDecoded = try! JSONDecoder().decode(
+            [String: [String]].self, from: Data(piEmpty.utf8))
+        expect(
+            piEmpty == ClaudeExtraRoots.payloadJSON([])
+                && piEmptyDecoded["claude"] == []
+                && piEmptyDecoded["pi"] == nil,
+            "PI-ROOTS an empty registry is still the canonical Claude-only empty "
+                + "payload — the full-replace clear path — rather than a payload that "
+                + "leaves one client's old roots behind")
+
+        let piDup = ExtraScanRoots.payloadJSON(
+            claudeConfigDirs: [], piRoots: [piRootA, "\(piRootA)/", piRootA])
+        let piDupDecoded = try! JSONDecoder().decode(
+            [String: [String]].self, from: Data(piDup.utf8))
+        expect(
+            piDupDecoded["pi"] == [piRootA],
+            "PI-ROOTS repeated Pi roots are standardized and deduplicated before "
+                + "the wire, so one folder cannot enter the scan twice")
+
+        // Path shape: home/root/existing non-directories are refused, while a
+        // missing path is kept (and warned about) because it can become a
+        // directory later. The file case is the dangerous one: `WalkDir` would
+        // yield a regular file as its own entry and ingest its contents.
+        let piTempDir = FileManager.default.temporaryDirectory.path
+        let piMissing = "\(piTempDir)/tokenbar-pi-selftest-missing-\(UUID().uuidString)"
+        let piFile = "\(piTempDir)/tokenbar-pi-selftest-file-\(UUID().uuidString)"
+        try? Data("not a directory".utf8).write(to: URL(fileURLWithPath: piFile))
+        defer { try? FileManager.default.removeItem(atPath: piFile) }
+        let piHome = FileManager.default.homeDirectoryForCurrentUser.path
+        expect(
+            ExtraScanRoots.Pi.isRejectedRoot(piHome)
+                && ExtraScanRoots.Pi.isRejectedRoot("/")
+                && ExtraScanRoots.Pi.isRejectedRoot(piFile)
+                && !ExtraScanRoots.Pi.isRejectedRoot(piTempDir)
+                && !ExtraScanRoots.Pi.isRejectedRoot(piMissing),
+            "PI-ROOTS home, root, and an existing non-directory are refused; an "
+                + "ordinary folder and a not-yet-created root are accepted (mutation: "
+                + "letting a file through, which the scanner would ingest)")
+        expect(
+            !ExtraScanRoots.Pi.isMissing(piTempDir)
+                && ExtraScanRoots.Pi.isMissing(piMissing),
+            "PI-ROOTS isMissing distinguishes a present directory from an absent "
+                + "path, which is what drives the per-row warning")
+
+        // A successful setter call can still refuse one path. The applied
+        // marker must record the registry the engine accepted, not the request:
+        // a rejected Pi path is absent while an unreadable one — which IS
+        // registered and retried — stays, and Claude's roots survive either way.
+        let piPartialJSON = """
+        {"registeredCount":2,
+         "unreadable":[{"client":"pi","path":"\(piMissing)","reason":"not found"}],
+         "rejected":[{"client":"pi","path":"\(piRootB)","reason":"not a directory"}]}
+        """
+        let piPartial = try! JSONDecoder().decode(
+            ExtraScanPathsResult.self, from: Data(piPartialJSON.utf8))
+        let piRequested = ExtraScanRoots.payloadJSON(
+            claudeConfigDirs: ["/Users/x/.claude-work"],
+            piRoots: [piRootA, piRootB, piMissing])
+        let piRegistered = ClaudeExtraRoots.registeredJSON(
+            piRequested, rejected: piPartial.rejected)
+        let piRegisteredDecoded = try! JSONDecoder().decode(
+            [String: [String]].self, from: Data(piRegistered.utf8))
+        expect(
+            piRegisteredDecoded["pi"] == [piRootA, piMissing]
+                && piRegisteredDecoded["claude"]
+                    == ClaudeExtraRoots.expand("/Users/x/.claude-work"),
+            "PI-ROOTS a refused Pi path leaves the applied payload, an unreadable "
+                + "one stays registered, and Claude's roots are preserved")
+        ClaudeExtraRoots.resetAppliedForTesting()
+        ClaudeExtraRoots.recordApplied(piRegistered, result: piPartial)
+        expect(
+            ClaudeExtraRoots.appliedPayloadJSON == piRegistered,
+            "PI-ROOTS the recorder stores the merged registered subset, so a "
+                + "snapshot is stamped with every root the scan included")
+        ClaudeExtraRoots.resetAppliedForTesting()
+
+        // Generation/invalidation: installing a merged registry that moved
+        // advances the generation (views key their scan-derived reloads on it)
+        // and records both clients; installing the identical registry again,
+        // which is what every launch does, advances nothing.
+        let piMoved: (first: Bool, second: Bool, bothClients: Bool)? = awaitMainActorValue {
+            ClaudeExtraRoots.resetAppliedForTesting()
+            ClaudeExtraRoots.resetApplyClaimForTesting()
+            let payload = ExtraScanRoots.payloadJSON(
+                claudeConfigDirs: ["/tmp/tokenbar-pi-moved-claude"],
+                piRoots: ["/tmp/tokenbar-pi-moved-root"])
+            let result = try? JSONDecoder().decode(
+                ExtraScanPathsResult.self,
+                from: Data(#"{"registeredCount":2,"unreadable":[],"rejected":[]}"#.utf8))
+            let generation = { UserDefaults.standard.integer(forKey: ClaudeExtraRoots.generationKey) }
+            let before = generation()
+            let done = ThrottleGate()
+            ClaudeExtraRoots.installForTesting(
+                json: payload,
+                configDirsJSON: ClaudeExtraRoots.configDirsPayloadJSON([]),
+                setConfigDirs: { _ in },
+                setScanPaths: { _ in result },
+                then: { _ in Task { await done.open() } })
+            await done.wait()
+            let first = generation() != before
+            let applied = ClaudeExtraRoots.appliedPayloadJSON
+            let afterFirst = generation()
+            let doneAgain = ThrottleGate()
+            ClaudeExtraRoots.installForTesting(
+                json: payload,
+                configDirsJSON: ClaudeExtraRoots.configDirsPayloadJSON([]),
+                setConfigDirs: { _ in },
+                setScanPaths: { _ in result },
+                then: { _ in Task { await doneAgain.open() } })
+            await doneAgain.wait()
+            let second = generation() != afterFirst
+            let decoded = (try? JSONDecoder().decode(
+                [String: [String]].self, from: Data(applied.utf8))) ?? [:]
+            ClaudeExtraRoots.resetAppliedForTesting()
+            ClaudeExtraRoots.resetApplyClaimForTesting()
+            return (first, second, decoded["claude"] != nil && decoded["pi"] != nil)
+        }
+        expect(
+            piMoved?.first == true && piMoved?.second == false
+                && piMoved?.bothClients == true,
+            "PI-ROOTS installing a merged payload advances the generation and "
+                + "records both clients; reinstalling the same registry advances "
+                + "nothing, so the launch apply costs no rescan")
+
+        let piCopyKeys = [
+            "Additional Pi roots",
+            "Add folder…",
+            "Directories of Pi session-format JSONL files. Usage-only exports from headless runners are counted, and full Pi sessions also work.",
+            "Only assistant usage contributes. Roots merge into the Pi total; there is no per-root breakdown.",
+        ]
+        var piCopyMissing: [String] = []
+        for key in piCopyKeys {
+            for locale in ["zh-Hant", "zh-Hans"] {
+                guard let value = AppLanguage.localizedString(
+                    key, locale: locale, bundle: .tokenBarResources),
+                    value != key
+                else {
+                    piCopyMissing.append("\(locale): \(key.prefix(24))")
+                    continue
+                }
+            }
+        }
+        expect(
+            piCopyMissing.isEmpty,
+            "PI-ROOTS every new Settings copy key exists in zh-Hant and zh-Hans "
+                + "(English is the key): \(piCopyMissing)")
+
         // MARK: - M3: a Claude card is addressed by (clientId, accountKey)
 
         // Two Claude accounts sharing `clientId == "claude"`, listed EXTRA
