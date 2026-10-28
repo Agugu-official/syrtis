@@ -29,11 +29,12 @@ struct AgentIconView: View {
         "dsh",
     ]
 
-    /// Clients that share another client's brand icon. The Antigravity CLI is
-    /// the same product family as the Antigravity IDE and uses its logo; Kilo
-    /// CLI and KiloCode are the same Kilo-Org brand.
+    /// Clients that share another client's brand icon. The Antigravity CLI and
+    /// extension are the same product family as the Antigravity IDE and use its
+    /// logo; Kilo CLI and KiloCode are the same Kilo-Org brand.
     private static let iconAliases: [String: String] = [
         "antigravity-cli": "antigravity",
+        "antigravity-extension": "antigravity",
         "kilo": "kilocode",
         "grok-bot": "grok",
     ]

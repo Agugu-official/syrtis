@@ -272,13 +272,14 @@ struct AgentLimitsCard: View {
     // tab with no snapshot of its own (it shares the IDE's account and quota),
     // so `restrict` mode aliased the IDE's snapshot under the CLI's id to give
     // that lone tab a quota card at all. Now that `ClientRegistry.tabSlice`
-    // groups "antigravity" and "antigravity-cli" under one tab, `clients` in
-    // `restrict` mode carries BOTH ids, and the alias would make BOTH pass
-    // `known(_:)` and render the same quota card twice under that one tab —
+    // groups "antigravity", "antigravity-cli" and "antigravity-extension" under
+    // one tab, `clients` in `restrict` mode carries every member id, and the
+    // alias would make the CLI id pass `known(_:)` too and render the same
+    // quota card twice under that one tab —
     // exactly the duplication the old comment warned about for the overview,
     // now reachable from restrict mode too. Dropping the alias leaves
-    // "antigravity-cli" correctly unknown here (it has no snapshot and no
-    // placeholder row): its usage still surfaces through the other Overview
+    // the CLI and extension ids correctly unknown here (neither has a snapshot
+    // or a placeholder row): their usage still surfaces through the other Overview
     // cards (chart/trace/model breakdown), which is what a grouped tab means.
     //
     // There is deliberately no instance wrapper around the static function any
@@ -1433,6 +1434,8 @@ struct AgentLimitsCard: View {
     static func normalizeTraceClient(_ id: String) -> String {
         let canonical = ClientRegistry.canonicalClient(id)
         guard canonical == id else { return canonical } // an explicit alias applied
-        return id.hasSuffix("-cli") ? String(id.dropLast(4)) : id
+        // `antigravity-extension` has no `-cli` suffix to strip; the registry's
+        // quota owner is the one list of non-suffix members.
+        return ClientRegistry.quotaOwner(id.hasSuffix("-cli") ? String(id.dropLast(4)) : id)
     }
 }
