@@ -85,7 +85,7 @@ docs/knowledge/
 
 | Source | Authority |
 |---|---|
-| Public [`tokscale-core/UPSTREAM.md`](https://github.com/Nanako0129/tokscale-core/blob/036fbf2966029391f2f0ea2c0cde146747066762/UPSTREAM.md) | Exact shared-engine upstream baseline, selected changes, reports, and local-patch ledger |
+| Public [`tokscale-core/UPSTREAM.md`](https://github.com/Nanako0129/tokscale-core/blob/af1cb144ab36d909258ad792d6b012299775b52a/UPSTREAM.md) | Exact shared-engine upstream baseline, selected changes, reports, and local-patch ledger |
 | `vendor/README.md` | Syrtis's shared-engine repository and reviewed consumer pin |
 | `.github/workflows/*.yml` | Runtime CI, Pages, release, and install-count gates |
 | `Makefile` | Local build order and stale Rust static-library relink guard |
