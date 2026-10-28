@@ -227,7 +227,7 @@ enum SnapshotStore {
     /// field exists for.
     ///
     /// Last applied rather than currently applied: a restore runs before the
-    /// launch-time `ClaudeExtraRoots.apply` lands, so the in-memory value is
+    /// launch-time `ExtraScanRoots.apply` lands, so the in-memory value is
     /// still empty and comparing against it would reject every snapshot on
     /// every launch. Last applied rather than configured, because a path the
     /// setter REFUSED is in the configured list and was never in the scan.

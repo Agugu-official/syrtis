@@ -65,14 +65,24 @@ enum ClaudeExtraRoots {
         return ["\(base)/projects", "\(base)/transcripts"]
     }
 
+    /// Expand and deduplicate the configured dirs into the exact list of scan
+    /// roots the engine walks. Split out so `ExtraScanRoots` can merge this
+    /// list with another client's roots without decoding the encoded payload.
+    static func expandedPaths(_ configDirs: [String]) -> [String] {
+        var seen = Set<String>()
+        return configDirs.flatMap(expand).filter { seen.insert($0).inserted }
+    }
+
     /// Build the `tb_set_extra_scan_paths` payload from the persisted list:
     /// `{"claude": [path, path, ...]}`, expanded and deduplicated. One call
     /// covers every configured dir — full-replace semantics, so an empty
     /// list clears the registry (the Settings rollback path).
+    ///
+    /// Claude-only, and kept byte-compatible: `ExtraScanRoots.payloadJSON`
+    /// returns this exact string when no Pi roots are configured, so an
+    /// upgrade does not look like a scan-root change.
     static func payloadJSON(_ configDirs: [String]) -> String {
-        var seen = Set<String>()
-        let expanded = configDirs.flatMap(expand).filter { seen.insert($0).inserted }
-        let object = ["claude": expanded]
+        let object = ["claude": expandedPaths(configDirs)]
         let data = (try? JSONEncoder().encode(object)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
@@ -196,7 +206,13 @@ enum ClaudeExtraRoots {
               let object = try? JSONDecoder().decode([String: [String]].self, from: data)
         else { return requestedJSON }
         let kept = object.mapValues { paths in paths.filter { !refused.contains($0) } }
-        guard let encoded = try? JSONEncoder().encode(kept),
+        // Sorted keys keep a two-client payload byte-stable after a partial
+        // reject. Without it, re-encoding could emit `pi` before `claude` while
+        // the next apply emits the opposite order, and the applied-payload
+        // comparison would treat an unchanged registry as a root move.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let encoded = try? encoder.encode(kept),
               let text = String(data: encoded, encoding: .utf8)
         else { return requestedJSON }
         return text
@@ -414,11 +430,18 @@ enum ClaudeExtraRoots {
         return true
     }
 
-    /// Push the persisted config dirs to the Rust registry. Call at launch
-    /// and after every add/remove so the change takes effect without an app
+    /// Push the scan-root payload to the Rust registry. Call at launch and
+    /// after every add/remove so the change takes effect without an app
     /// restart (D1). Failures are logged by `TBCore`, not thrown further — a
     /// bridge failure here must not block the rest of app startup or a
     /// Settings edit.
+    ///
+    /// `scanPayload` is required rather than defaulted: the engine's setter is
+    /// full-replace, so a Claude-only payload would silently clear every other
+    /// client's roots. `ExtraScanRoots.apply` is the coordinator that builds
+    /// the complete payload; this type owns the install machinery (the quota
+    /// registry, applied-payload marker, generation, cache invalidation, and
+    /// quota wake) that both clients share.
     ///
     /// **Never runs the setter on the calling actor.** The core probes every
     /// configured path with `read_dir`, and an unmounted external volume or a
@@ -439,11 +462,12 @@ enum ClaudeExtraRoots {
     /// since neither side reports an error. Serial means the last save is
     /// also the last registered.
     static func apply(
+        scanPayload: @escaping @Sendable @MainActor () -> String,
         then completion: (@Sendable @MainActor (ExtraScanPathsResult?) -> Void)? = nil
     ) {
         Task { @MainActor in
             let configDirs = load()
-            let json = payloadJSON(configDirs)
+            let json = scanPayload()
             let configDirsJSON = configDirsPayloadJSON(configDirs)
             // Both applies for one save are enqueued here before either
             // reaches the queue below, and the main actor runs them in order,

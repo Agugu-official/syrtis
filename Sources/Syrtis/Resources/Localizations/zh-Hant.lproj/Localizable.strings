@@ -316,6 +316,8 @@
 "Every %lld min" = "每 %lld 分鐘";
 
 "Add config dir…" = "加入設定資料夾…";
+"Add folder…" = "加入資料夾…";
+"Additional Pi roots" = "額外的 Pi 根目錄";
 "Add" = "加入";
 "Folder not found. Kept in case the drive is disconnected or the path needs fixing." = "找不到這個資料夾。先保留，以防磁碟沒接上或路徑待修正。";
 
@@ -338,6 +340,8 @@
 "How often Syrtis rereads all logs in full. In between, new activity still shows up within 5 minutes." = "Syrtis 多久完整重讀一次所有紀錄檔。兩次之間，新的用量仍會在 5 分鐘內出現。";
 "Syrtis started as a fork of tokcat by handlecusion. Log parsing and pricing come from tokscale by Junho Yeo, the menu bar design draws on CodexBar by Peter Steinberger, and the running cat comes from RunCat by Takuto Nakamura. MIT licensed." = "Syrtis 最初是從 handlecusion 的 tokcat 分支出來的。紀錄解析和計價來自 Junho Yeo 的 tokscale；選單列設計參考 Peter Steinberger 的 CodexBar；奔跑的貓來自 Takuto Nakamura 的 RunCat。採用 MIT 授權。";
 "For another Claude account, run Claude Code with CLAUDE_CONFIG_DIR set to its own folder and add that folder here. Its usage joins your totals; accounts aren't shown separately." = "另一個 Claude 帳號：用 CLAUDE_CONFIG_DIR 指定它自己的資料夾來執行 Claude Code，再把資料夾加到這裡。它的用量會算進總計，不會分帳號顯示。";
+"Directories of Pi session-format JSONL files. Usage-only exports from headless runners are counted, and full Pi sessions also work." = "Pi 工作階段格式 JSONL 檔案的資料夾。無介面執行器寫出的純用量匯出也會計入，完整的 Pi 工作階段同樣適用。";
+"Only assistant usage contributes. Roots merge into the Pi total; there is no per-root breakdown." = "只有助理用量會計入。各根目錄的用量會合併進 Pi 總計，不會分開顯示。";
 "%lld of %lld folders can't be read right now; Syrtis will retry on the next scan." = "%2$lld 個資料夾中有 %1$lld 個暫時讀不到，下次掃描會再試。";
 "%lld path(s) can't be scanned and weren't added." = "有 %lld 個路徑無法掃描，沒有加入。";
 

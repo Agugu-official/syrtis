@@ -58,11 +58,12 @@ enum Smoke {
         }
 
         // The extra-scan-paths setter is the only FFI entry point whose Swift
-        // caller swallows its error (`ClaudeExtraRoots.apply` uses `try?`, so a
-        // bridge failure surfaces as a silently empty result rather than a
-        // crash). Exercising it here is what keeps an envelope-field or decoder
-        // mismatch from passing every other gate: the Rust tests call
-        // `set_from_json` directly and the Swift selftest never touches the FFI.
+        // caller swallows its error (`ExtraScanRoots.apply` reaches the same
+        // `try?`, so a bridge failure surfaces as a silently empty result
+        // rather than a crash). Exercising it here is what keeps an
+        // envelope-field or decoder mismatch from passing every other gate:
+        // the Rust tests call `set_from_json` directly and the Swift selftest
+        // never touches the FFI.
         // An empty object is safe — the registry is process-local, so clearing
         // it affects nothing beyond this short-lived smoke process.
         summarize("extra-scan-paths") {
@@ -88,7 +89,7 @@ enum Smoke {
         // check first came back showing one account when two were configured.
         //
         // The shipping app installs this asynchronously at launch
-        // (`ClaudeExtraRoots.apply`), so a fetch issued in the first moments can
+        // (`ExtraScanRoots.apply`), so a fetch issued in the first moments can
         // still race it and see an empty registry; losing that race costs one
         // refresh, and the accounts appear on the next.
         summarize("claude-accounts") {

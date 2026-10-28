@@ -38,8 +38,11 @@ pub(crate) fn snapshot() -> BTreeMap<String, Vec<PathBuf>> {
 /// registry entry that will never contribute to a report.
 ///
 /// Extend this list when Syrtis wires extra-root support for another
-/// client.
-const SUPPORTED_CLIENTS: &[&str] = &["claude"];
+/// client. `pi` is the second entry: its lane scans `*.jsonl` under each root
+/// with the same parser that reads the default `~/.pi/agent/sessions` tree, so
+/// a usage-only export and a full session are both accepted without a separate
+/// parser.
+const SUPPORTED_CLIENTS: &[&str] = &["claude", "pi"];
 
 /// Clear the registry. Test seam: the statics are process-wide, so a test that
 /// leaves one populated changes the next test's answer.
@@ -227,6 +230,74 @@ mod tests {
         let list: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
         let payload = serde_json::json!({ "claude": list }).to_string();
         set_from_json(&payload).unwrap()
+    }
+
+    fn set_pi_roots(paths: &[&Path]) {
+        _ = set_pi_roots_result(paths);
+    }
+
+    fn set_pi_roots_result(paths: &[&Path]) -> serde_json::Value {
+        let list: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        set_from_json(&serde_json::json!({ "pi": list }).to_string()).unwrap()
+    }
+
+    /// A usage-only export: Pi's v3 session header plus one assistant record
+    /// with usage/model and no prompt, system prompt, tool call, or tool
+    /// output. This is the subset a headless runner can write after invoking
+    /// Pi with `--no-session`.
+    fn write_pi_usage_only(
+        root: &Path,
+        file_name: &str,
+        session_id: &str,
+        response_id: &str,
+        tokens: [i64; 4],
+    ) {
+        fs::create_dir_all(root).unwrap();
+        let [input, output, cache_read, cache_write] = tokens;
+        let total = input + output + cache_read + cache_write;
+        let content = format!(
+            "{}\n{}\n",
+            serde_json::json!({
+                "type": "session",
+                "version": 3,
+                "id": session_id,
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "cwd": "/tmp/pi-project",
+            }),
+            serde_json::json!({
+                "type": "message",
+                "id": format!("entry-{response_id}"),
+                "timestamp": "2026-01-01T00:00:01.000Z",
+                "message": {
+                    "role": "assistant",
+                    "provider": "anthropic",
+                    "model": "claude-3-5-sonnet",
+                    "usage": {
+                        "input": input,
+                        "output": output,
+                        "cacheRead": cache_read,
+                        "cacheWrite": cache_write,
+                        "totalTokens": total,
+                    },
+                    "responseId": response_id,
+                },
+            })
+        );
+        fs::write(root.join(format!("{file_name}.jsonl")), content).unwrap();
+    }
+
+    /// Token total and message count from the real local parse/report path for
+    /// the Pi lane, using the same context and options `tb_graph` and
+    /// `tb_model_report` pass to the engine.
+    fn pi_report(context: &LocalSourceContext) -> (i64, i32) {
+        let options = context.parse_options(None, Some(vec!["pi".to_string()]));
+        let parsed = tokscale_core::parse_local_clients(options).unwrap();
+        let tokens = parsed
+            .messages
+            .iter()
+            .map(|m| m.input + m.output + m.cache_read + m.cache_write + m.reasoning)
+            .sum();
+        (tokens, parsed.counts.get(tokscale_core::ClientId::Pi))
     }
 
     // A1: two temp roots, id-disjoint content. Unset -> only primary. Set -> sum.
@@ -567,6 +638,256 @@ mod tests {
             snapshot().is_empty(),
             "the registry must not carry an entry for an unsupported client"
         );
+        reset();
+    }
+
+    // A10: Pi is in SUPPORTED_CLIENTS, so a directory is accepted into the
+    // registry instead of being dropped as an unsupported client.
+    #[test]
+    fn a10_pi_directory_is_accepted_as_an_additional_root() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let temp = tempfile::tempdir().unwrap();
+        let pi_root = temp.path().join("pi-usage");
+        fs::create_dir_all(&pi_root).unwrap();
+
+        let result = set_pi_roots_result(&[&pi_root]);
+
+        assert_eq!(result["registeredCount"], 1);
+        assert_eq!(
+            result["unreadable"].as_array().unwrap().len(),
+            0,
+            "a readable directory is not listed as unreadable"
+        );
+        assert_eq!(
+            result["rejected"].as_array().unwrap().len(),
+            0,
+            "Pi is an allowlisted client, not an unsupported one"
+        );
+        assert_eq!(
+            snapshot().get("pi"),
+            Some(&vec![pi_root.clone()]),
+            "the Pi root is carried in the process-wide registry"
+        );
+        reset();
+    }
+
+    // A11: the Pi allowlist must not weaken the path-shape gate. A transcript
+    // file handed in as a root is rejected (it would otherwise be scanned as
+    // its own entry), and a relative path is rejected because it would resolve
+    // against the process CWD.
+    #[test]
+    fn a11_pi_file_and_relative_paths_are_rejected() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let temp = tempfile::tempdir().unwrap();
+        let file_root = temp.path().join("session.jsonl");
+        fs::write(
+            &file_root,
+            format!(
+                "{}\n{}\n",
+                serde_json::json!({
+                    "type": "session", "version": 3, "id": "pi-file-root",
+                    "timestamp": "2026-01-01T00:00:00.000Z", "cwd": "/tmp/pi-project",
+                }),
+                serde_json::json!({
+                    "type": "message", "id": "entry-file-root",
+                    "timestamp": "2026-01-01T00:00:01.000Z",
+                    "message": {
+                        "role": "assistant", "provider": "anthropic",
+                        "model": "claude-3-5-sonnet",
+                        "usage": {"input": 500, "output": 500},
+                        "responseId": "resp-file-root",
+                    },
+                })
+            ),
+        )
+        .unwrap();
+
+        let result = set_from_json(
+            &serde_json::json!({
+                "pi": [file_root.display().to_string(), "relative/pi-root".to_string()]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(result["registeredCount"], 0);
+        assert_eq!(
+            result["unreadable"].as_array().unwrap().len(),
+            0,
+            "neither wrong shape is retryable"
+        );
+        let rejected = result["rejected"].as_array().unwrap();
+        assert_eq!(rejected.len(), 2);
+        assert!(rejected.iter().all(|note| note["client"] == "pi"));
+        assert!(
+            rejected
+                .iter()
+                .any(|note| note["reason"] == "path is not a directory")
+        );
+        assert!(
+            rejected
+                .iter()
+                .any(|note| note["reason"] == "path is not absolute")
+        );
+        assert!(
+            snapshot().is_empty(),
+            "rejected Pi paths must never enter the registry"
+        );
+        assert_eq!(
+            pi_report(&context_for(temp.path())),
+            (0, 0),
+            "a transcript passed as a root must not contribute its tokens"
+        );
+        reset();
+    }
+
+    // A12: the setter is full-replace across the whole registry, not only
+    // within one client's list. A Claude-only payload clears Pi, a Pi-only
+    // payload clears Claude, and `{}` clears both.
+    #[test]
+    fn a12_full_replace_semantics_cover_every_client() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let temp = tempfile::tempdir().unwrap();
+        let claude_root = temp.path().join("claude-projects");
+        write_claude_session(
+            &claude_root,
+            "claude",
+            &turn("msg_replace", "req_replace", 10, 5),
+        );
+        let pi_one = temp.path().join("pi-one");
+        let pi_two = temp.path().join("pi-two");
+        fs::create_dir_all(&pi_one).unwrap();
+        fs::create_dir_all(&pi_two).unwrap();
+
+        set_pi_roots(&[&pi_one]);
+        assert_eq!(
+            snapshot().keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["pi"]
+        );
+
+        set_claude_roots(&[&claude_root]);
+        assert_eq!(
+            snapshot().keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["claude"],
+            "a Claude-only call must clear the previous Pi root"
+        );
+
+        set_from_json(
+            &serde_json::json!({
+                "claude": [claude_root.display().to_string()],
+                "pi": [pi_one.display().to_string()],
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot().keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["claude", "pi"],
+            "one payload can carry both clients"
+        );
+
+        set_pi_roots(&[&pi_two]);
+        assert_eq!(
+            snapshot().get("pi"),
+            Some(&vec![pi_two.clone()]),
+            "replacing a client's list drops that client's earlier path"
+        );
+
+        set_from_json("{}").unwrap();
+        assert!(
+            snapshot().is_empty(),
+            "an empty object clears every client, including Pi"
+        );
+        reset();
+    }
+
+    // A13: end-to-end through the real scanner/report path with a temp home.
+    // The usage-only export has no session file under the default
+    // `~/.pi/agent/sessions` tree, so it is invisible until its directory is
+    // registered as an additional Pi root.
+    #[test]
+    fn a13_pi_usage_only_export_reaches_the_pi_report() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let home = tempfile::tempdir().unwrap();
+        let extra = tempfile::tempdir().unwrap();
+        let extra_root = extra.path().join("pi-usage");
+        write_pi_usage_only(
+            &extra_root,
+            "headless",
+            "pi-headless",
+            "resp-headless",
+            [100, 20, 10, 5],
+        );
+
+        let context = context_for(home.path());
+        assert_eq!(
+            pi_report(&context),
+            (0, 0),
+            "nothing under the default Pi root and no extra root registered"
+        );
+
+        set_pi_roots(&[&extra_root]);
+        assert_eq!(
+            pi_report(&context),
+            (135, 1),
+            "the usage-only assistant record reaches Pi's token total and message count"
+        );
+        reset();
+    }
+
+    // A14: the Pi lane already deduplicates across files by `responseId`, so a
+    // real session and a usage-only export of the same run must count once.
+    #[test]
+    fn a14_pi_usage_only_export_dedups_against_a_real_session() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        reset();
+        let home = tempfile::tempdir().unwrap();
+        let extra = tempfile::tempdir().unwrap();
+        let default_root = home.path().join(".pi/agent/sessions/-tmp-pi-project");
+        write_pi_usage_only(
+            &default_root,
+            "real-session",
+            "pi-real",
+            "resp-shared",
+            [100, 20, 0, 0],
+        );
+        let extra_root = extra.path().join("pi-usage");
+        write_pi_usage_only(
+            &extra_root,
+            "usage-only",
+            "pi-export",
+            "resp-shared",
+            [100, 20, 0, 0],
+        );
+
+        let context = context_for(home.path());
+        assert_eq!(
+            pi_report(&context),
+            (120, 1),
+            "control: the real session alone contributes its usage once"
+        );
+
+        set_pi_roots(&[&extra_root]);
+        assert_eq!(
+            pi_report(&context),
+            (120, 1),
+            "the same responseId in a real session and a usage-only export counts once"
+        );
+
+        // Control: a distinct response in the extra root still adds, so the
+        // assertion above is not satisfied by ignoring the extra root.
+        write_pi_usage_only(
+            &extra_root,
+            "usage-only-2",
+            "pi-export-2",
+            "resp-other",
+            [30, 5, 0, 0],
+        );
+        assert_eq!(pi_report(&context), (155, 2));
         reset();
     }
 }

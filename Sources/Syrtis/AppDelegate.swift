@@ -32,11 +32,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // then — never on the flood of unrelated writes. Same value-gating
     // discipline as refreshIntervalMin, to avoid the CPU-regression storm.
     private var lastHiddenRaw = UserDefaults.standard.string(forKey: ClientRegistry.tabHiddenKey) ?? ""
-    // Value gate for the Claude extra-scan-roots list, same discipline as
+    // Value gate for the extra-scan-root lists, same discipline as
     // lastHiddenRaw: didChangeNotification fires for every unrelated write,
-    // so only re-push to the FFI registry when this specific key actually
-    // changed (e.g. Settings added/removed a config dir).
+    // so only re-push to the FFI registry when one of these specific keys
+    // actually changed (e.g. Settings added/removed a Claude config dir or an
+    // additional Pi root). Both values are tracked because the setter is
+    // full-replace and one merged payload carries both clients.
     private var lastExtraRootsRaw = UserDefaults.standard.string(forKey: ClaudeExtraRoots.storageKey) ?? ""
+    private var lastPiExtraRootsRaw = UserDefaults.standard.string(forKey: ExtraScanRoots.Pi.storageKey) ?? ""
     // The Discord presence client, or nil whenever this process may not connect
     // (switched off, or a demo/test run). Only makeDiscordClient creates it.
     private var discord: DiscordIPCClient?
@@ -77,9 +80,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Record the timezone the (still empty) graph cache will be filled
         // under, before the title-refresh loop below starts warming it.
         AttributedSeriesModel.captureLaunchTimeZone()
-        // Push any configured Claude extra scan roots. The FFI registry starts
+        // Push any configured extra scan roots (Claude config dirs and
+        // additional Pi roots) as ONE merged payload. The FFI registry starts
         // empty every process launch (it's an in-memory RwLock, not persisted
-        // core-side; UserDefaults is the source of truth Swift owns).
+        // core-side; UserDefaults is the source of truth Swift owns), and the
+        // setter is full-replace, so sending one client alone would clear the
+        // other.
         //
         // This races the first scan by design and does not block launch. The
         // setter probes each path with `read_dir`, so an unmounted volume —
@@ -87,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // stall startup. Losing that race costs one scan: the extra roots join
         // the next one. Freezing the menu bar until a dead network mount times
         // out costs considerably more.
-        ClaudeExtraRoots.apply()
+        ExtraScanRoots.apply()
 
         // Same split for the same reason: the Keychain consent registry is
         // also an in-memory RwLock that starts empty, so Swift re-applies the
@@ -394,13 +400,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.refreshFilteredRate()
             }
 
-            // Settings added/removed/edited a Claude config dir — push the
-            // new list to the FFI registry immediately (D1: no restart).
+            // Settings added/removed/edited a Claude config dir or an
+            // additional Pi root — push the merged list to the FFI registry
+            // immediately (D1: no restart). Either key can move; the payload
+            // always carries both clients.
             let extraRootsRaw = UserDefaults.standard.string(
                 forKey: ClaudeExtraRoots.storageKey) ?? ""
-            if extraRootsRaw != self.lastExtraRootsRaw {
+            let piExtraRootsRaw = UserDefaults.standard.string(
+                forKey: ExtraScanRoots.Pi.storageKey) ?? ""
+            if extraRootsRaw != self.lastExtraRootsRaw
+                || piExtraRootsRaw != self.lastPiExtraRootsRaw
+            {
                 self.lastExtraRootsRaw = extraRootsRaw
-                ClaudeExtraRoots.apply()
+                self.lastPiExtraRootsRaw = piExtraRootsRaw
+                ExtraScanRoots.apply()
             }
 
             // Hiding a client has to leave the published presence in the SAME
