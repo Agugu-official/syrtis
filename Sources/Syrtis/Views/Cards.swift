@@ -133,6 +133,9 @@ struct GlassCardBackground: ViewModifier {
                 .background(
                     ReducedTransparencySurface.card,
                     in: RoundedRectangle(cornerRadius: cornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .strokeBorder(ReducedTransparencySurface.cardEdge, lineWidth: 1))
         } else if #available(macOS 26.0, *) {
             // .clear glass lets the wallpaper breathe through the cards
             // themselves (.regular reads as a dense dark slab when cards
