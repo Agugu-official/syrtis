@@ -1244,17 +1244,20 @@ pub unsafe extern "C" fn tb_quota_curve(
 /// `extra_scan_paths` module doc). `json` is an object of
 /// `{"<public-client-id>": ["<absolute-dir-path>", ...]}`, e.g.
 /// `{"claude":["/Users/x/.claude-work/projects","/Users/x/.claude-work/transcripts"]}`.
-/// Full-replace: passing `{}` (or every client's list empty) clears the
-/// registry. Every subsequent report/parse call picks up the new roots
-/// immediately — no restart required. `data` on success is
+/// The allowlisted clients are `claude` and `pi`. Full-replace: passing `{}`
+/// (or every client's list empty) clears the registry — a payload for one
+/// client therefore clears every other client's roots, so callers must always
+/// send the complete set. Every subsequent report/parse call picks up the new
+/// roots immediately — no restart required. `data` on success is
 /// `{"registeredCount":N,"unreadable":[{"client","path","reason"}],"rejected":[{"client","path","reason"}]}`.
-/// A path whose client id is supported is always registered, even when it
-/// can't be read right now (unmounted volume, not-yet-created config dir) —
-/// such a path is listed in `unreadable` and is retried automatically by the
-/// next scan, with no need to call this setter again. A path is only ever
-/// left out of the registry (`rejected`) when its client id is not one this
-/// consumer wires extra-root support for. Malformed JSON returns
-/// `{"ok":false,...}` and leaves the registry untouched.
+/// A path whose client id is supported is registered even when it can't be
+/// read right now (unmounted volume, not-yet-created config dir) — such a path
+/// is listed in `unreadable` and is retried automatically by the next scan,
+/// with no need to call this setter again. A path is left out of the registry
+/// (`rejected`) when its client id is not one this consumer wires extra-root
+/// support for, or when it can never be a scan root (empty, relative, or an
+/// existing non-directory). Malformed JSON returns `{"ok":false,...}` and
+/// leaves the registry untouched.
 ///
 /// # Safety
 /// `json` must be NULL or a valid NUL-terminated UTF-8 string.
