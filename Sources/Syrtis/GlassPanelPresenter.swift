@@ -363,6 +363,7 @@ extension EnvironmentValues {
 /// which washed secondary text out in light mode.
 struct GlassPanelSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject private var glassTint = GlassTint.shared
 
     func body(content: Content) -> some View {
@@ -371,10 +372,14 @@ struct GlassPanelSurface: ViewModifier {
             styledText(content.environment(\.inGlassPanel, true))
                 .clipShape(shape)
                 .background {
-                    Rectangle().fill(.clear)
-                        .glassEffect(
-                            glass,
-                            in: .rect(cornerRadius: GlassPanelStyle.cornerRadius))
+                    if reduceTransparency {
+                        shape.fill(ReducedTransparencySurface.window)
+                    } else {
+                        Rectangle().fill(.clear)
+                            .glassEffect(
+                                glass,
+                                in: .rect(cornerRadius: GlassPanelStyle.cornerRadius))
+                    }
                 }
         } else {
             content

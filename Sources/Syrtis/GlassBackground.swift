@@ -53,12 +53,40 @@ struct GlassBackground: View {
 /// wallpaper blur that makes Liquid Glass cards come alive).
 struct PopoverBackdrop: View {
     @Environment(\.inGlassPanel) private var inGlassPanel
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         if inGlassPanel {
-            Color.clear // the panel's own .regular glass is the backdrop
+            Color.clear // the panel's own surface is the backdrop
+        } else if reduceTransparency {
+            ReducedTransparencySurface.window
         } else {
             VisualEffectBackground(material: .hudWindow)
+        }
+    }
+}
+
+/// Opaque stand-ins for the glass surfaces while Accessibility > Display >
+/// Reduce Transparency is on. The card scrims and the HUD backdrop are tuned
+/// for a translucent backdrop; with transparency reduced, #504 reported the
+/// Settings cards turning a flat dark grey that was hard to read.
+///
+/// Cards sit one step lighter than the surface behind them in both appearances,
+/// the grouped-form look. `windowBackgroundColor` and `controlBackgroundColor`
+/// cannot express that: measured on macOS 27.0.1 they are the same colour
+/// (#FFFFFF light, #1E1E1E dark), so cards vanished into the window. The pair
+/// that differs is `underPageBackgroundColor` (#F6F6F6 light, #282828 dark)
+/// and `windowBackgroundColor`, whose order flips between appearances, hence
+/// the dynamic provider. In light mode the two differ by only a few percent,
+/// so cards also get a separator-coloured edge.
+enum ReducedTransparencySurface {
+    static let window = Color(nsColor: dynamic(light: .underPageBackgroundColor, dark: .windowBackgroundColor))
+    static let card = Color(nsColor: dynamic(light: .windowBackgroundColor, dark: .underPageBackgroundColor))
+    static let cardEdge = Color(nsColor: .separatorColor)
+
+    private static func dynamic(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
         }
     }
 }
